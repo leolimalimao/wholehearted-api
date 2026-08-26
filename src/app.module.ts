@@ -1,8 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { BullModule } from '@nestjs/bullmq';
 import { AuthModule } from './auth/auth.module';
 import { SpotifyModule } from './spotify/spotify.module';
+import { ScrobblesModule } from './scrobbles/scrobbles.module';
+import { SyncModule } from './sync/sync.module';
 
 @Module({
   imports: [
@@ -16,8 +19,18 @@ import { SpotifyModule } from './spotify/spotify.module';
         synchronize: true, // dev only
       }),
     }),
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        connection: {
+          url: config.getOrThrow<string>('REDIS_URL'),
+        },
+      }),
+    }),
     AuthModule,
     SpotifyModule,
+    ScrobblesModule,
+    SyncModule,
   ],
 })
 export class AppModule {}
