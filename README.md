@@ -119,7 +119,7 @@ Edite o `.env` com base no `.env.example`:
 
 **Importante — OAuth:**
 
-1. Cadastre no Spotify Dashboard exatamente: `http://127.0.0.1:3000/api/auth/callback`
+1. Cadastre no Spotify Dashboard exatamente: `http://127.0.0.1:3001/api/auth/callback`
 2. Use o mesmo host no `.env` e no navegador (`127.0.0.1`, não `localhost`)
 3. Reinicie o servidor após alterar o `.env`
 
@@ -139,11 +139,11 @@ docker compose up -d
 npm run start:dev
 ```
 
-A API fica em `http://127.0.0.1:3000` (prefixo `/api`).
+A API fica em `http://127.0.0.1:3001` (prefixo `/api`).
 
 ### Fluxo de autenticação
 
-1. Abra no navegador: `http://127.0.0.1:3000/api/auth/login`
+1. Abra no navegador: `http://127.0.0.1:3001/api/auth/login`
 2. Autorize no Spotify
 3. Callback retorna:
 

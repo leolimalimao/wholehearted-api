@@ -6,6 +6,9 @@ import { AuthModule } from './auth/auth.module';
 import { SpotifyModule } from './spotify/spotify.module';
 import { ScrobblesModule } from './scrobbles/scrobbles.module';
 import { SyncModule } from './sync/sync.module';
+import { StatsModule } from './stats/stats.module';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 
 @Module({
   imports: [
@@ -16,21 +19,41 @@ import { SyncModule } from './sync/sync.module';
         type: 'postgres',
         url: config.get<string>('DATABASE_URL'),
         autoLoadEntities: true,
-        synchronize: true, // dev only
+        synchronize: process.env.NODE_ENV !== 'production',
       }),
     }),
     BullModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        connection: {
-          url: config.getOrThrow<string>('REDIS_URL'),
-        },
-      }),
+      useFactory: (config: ConfigService) => {
+        const redisUrl = config.getOrThrow<string>('REDIS_URL');
+        const url = new URL(redisUrl);
+        return {
+          connection: {
+            host: url.hostname,
+            port: parseInt(url.port),
+            password: url.password,
+            tls: redisUrl.startsWith('rediss://') ? {} : undefined,
+          },
+        };
+      },
     }),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,  // janela de 60 segundos
+        limit: 60,   // máximo 60 requests por janela por IP
+      }
+    ]),
     AuthModule,
     SpotifyModule,
     ScrobblesModule,
     SyncModule,
+    StatsModule,
   ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    }
+  ]
 })
-export class AppModule {}
+export class AppModule { }
