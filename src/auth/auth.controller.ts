@@ -12,7 +12,15 @@ export class AuthController {
   ) {}
 
   @Get('login')
-  login(@Res() res: Response) {
+  login(@Req() req: Request, @Res() res: Response) {
+    const redirectUri = this.config.getOrThrow<string>('SPOTIFY_REDIRECT_URI');
+    const canonicalHost = new URL(redirectUri).host;
+
+    // Cookies são por host — login e callback precisam usar o mesmo (ex.: 127.0.0.1, não localhost)
+    if (req.get('host') !== canonicalHost) {
+      return res.redirect(`${new URL(redirectUri).origin}/api/auth/login`);
+    }
+
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = generateCodeChallenge(codeVerifier);
     const state = generateState();
@@ -38,7 +46,7 @@ export class AuthController {
       response_type: 'code',
       client_id: this.config.getOrThrow<string>('SPOTIFY_CLIENT_ID'),
       scope: scopes.join(' '),
-      redirect_uri: this.config.getOrThrow<string>('SPOTIFY_REDIRECT_URI'),
+      redirect_uri: redirectUri,
       state,
       code_challenge_method: 'S256',
       code_challenge: codeChallenge,
