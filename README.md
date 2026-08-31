@@ -126,7 +126,7 @@ GET /api/stats/recent?limit=20             → últimas músicas ouvidas
 ### Setup
 
 ```bash
-git clone https://gitlab.com/seu-usuario/wholehearted-stats-api
+git clone https://gitlab.com/caritas-html/wholehearted-stats-api
 cd wholehearted-stats-api
 npm install
 ```
