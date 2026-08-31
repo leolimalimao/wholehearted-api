@@ -7,6 +7,7 @@ import { SpotifyModule } from './spotify/spotify.module';
 import { ScrobblesModule } from './scrobbles/scrobbles.module';
 import { SyncModule } from './sync/sync.module';
 import { StatsModule } from './stats/stats.module';
+import { RedisModule } from './common/redis/redis.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 
@@ -48,6 +49,7 @@ import { APP_GUARD } from '@nestjs/core';
     ScrobblesModule,
     SyncModule,
     StatsModule,
+    RedisModule,
   ],
   providers: [
     {
