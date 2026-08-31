@@ -1,280 +1,196 @@
-# Spotify Charts
+# 🎵 Wholehearted.stats — API
 
-Backend em NestJS que conecta à conta Spotify de um único usuário, persiste tokens com segurança e consulta a API do Spotify para construir, no futuro, rankings e gráficos de escuta personalizados.
+Backend do Wholehearted.stats, um sistema de scrobbling pessoal construído sobre a Spotify Web API. Registra automaticamente cada música ouvida e expõe endpoints de estatísticas agregadas.
 
-![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+**Produção:** https://spotify-lastfm-api-production.up.railway.app
 
-## Problema que resolve
+---
 
-O Spotify expõe dados de escuta (top tracks, histórico recente, faixa atual) via API, mas não oferece um painel customizável nem agregações próprias para análise longitudinal. Este projeto centraliza autenticação, renovação de tokens e acesso à API — base para sincronizar histórico, calcular charts e servir estatísticas.
+## O que é isso
 
-## Funcionalidades
+O Last.fm rastreia sua escuta via scrobbling — cada música tocada é registrada com timestamp. O Wholehearted.stats faz o mesmo, mas com infraestrutura própria: você controla os dados, a agregação e a visualização.
 
-### Disponíveis hoje
+A API autentica com o Spotify via OAuth + PKCE, armazena o refresh token criptografado e roda um job em background que consulta seu histórico de escuta a cada 5 minutos, persistindo apenas o que é novo.
 
-| Funcionalidade | Descrição |
-|----------------|-----------|
-| **OAuth 2.0 com PKCE** | Login via Spotify sem expor `client_secret` no browser |
-| **Validação anti-CSRF** | Parâmetro `state` + cookies `httpOnly` temporários |
-| **Persistência de usuário** | Perfil e tokens salvos no PostgreSQL |
-| **Criptografia de tokens** | Access e refresh tokens criptografados (AES-256-GCM) |
-| **Renovação automática** | Refresh do access token antes da expiração |
-| **Cliente Spotify** | Métodos internos: recently played, top tracks/artists, currently playing |
-| **Rate limit (429)** | Retry respeitando header `Retry-After` da API Spotify |
-| **Infra local** | Docker Compose para PostgreSQL e Redis |
+---
 
-### Planejadas
-
-| Funcionalidade | Descrição |
-|----------------|-----------|
-| **SyncModule** | Jobs periódicos (BullMQ) para sincronizar histórico de escutas |
-| **Charts / rankings** | Endpoints e agregações (top por período, evolução, etc.) |
-| **Sessão de admin** | Autenticação de sessão após OAuth |
-| **Integração Last.fm** | Nome do banco (`spotify_lastfm`) sugere cruzamento futuro de dados |
-| **Throttling e hardening** | `@nestjs/throttler`, `helmet`, validação com `class-validator` |
-| **Frontend / dashboard** | Visualização dos charts |
-
-## Arquitetura e decisões técnicas
+## Arquitetura
 
 ```
-Browser → GET /api/auth/login
-       → Spotify Authorize
-       → GET /api/auth/callback
-       → AuthService (tokens + perfil → PostgreSQL)
-       → SpotifyService (consultas autenticadas à API)
+┌─────────────────────────────────────────────────────┐
+│                    Railway (produção)                │
+│                                                     │
+│  ┌─────────────┐    ┌──────────────┐               │
+│  │  NestJS API  │    │  BullMQ      │               │
+│  │  (HTTP)      │    │  Worker      │               │
+│  └──────┬──────┘    └──────┬───────┘               │
+│         │                  │                        │
+│         ▼                  ▼                        │
+│  ┌─────────────────────────────────┐               │
+│  │         Upstash (Redis)          │               │
+│  └─────────────────────────────────┘               │
+│                                                     │
+│  ┌─────────────────────────────────┐               │
+│  │          Neon (PostgreSQL)       │               │
+│  └─────────────────────────────────┘               │
+└─────────────────────────────────────────────────────┘
+          ▲                    ▲
+          │                    │
+   Spotify Web API      Frontend (Vercel)
 ```
 
-- **Modelo single-user**: um único registro em `users` representa o dono da conta conectada.
-- **Prefixo global `/api`**: todas as rotas HTTP ficam sob `/api`.
-- **Host canônico no OAuth**: login redireciona para o host definido em `SPOTIFY_REDIRECT_URI` (`127.0.0.1` ≠ `localhost` para cookies).
-- **Dependência circular**: `AuthModule` ↔ `SpotifyModule` resolvida com `forwardRef`.
-- **`synchronize: true`**: apenas desenvolvimento; em produção usar migrations.
+**Fluxo do sync:**
+```
+BullMQ (a cada 5min)
+  → GET /me/player/recently-played (Spotify API)
+  → compara com último scrobble salvo (cursor por timestamp)
+  → persiste apenas músicas novas
+  → dorme 5 minutos → repete
+```
 
-## Stack tecnológica
+---
+
+## Stack
 
 | Camada | Tecnologia |
-|--------|------------|
-| Runtime | Node.js |
-| Framework | NestJS 11 |
-| Linguagem | TypeScript |
-| Banco | PostgreSQL 16 + TypeORM |
-| Cache/filas (previsto) | Redis 7 + BullMQ |
-| HTTP externo | Axios (`@nestjs/axios`) |
-| Config | `@nestjs/config` |
-| Segurança | AES-256-GCM, cookies `httpOnly`, PKCE |
+|---|---|
+| Framework | NestJS + TypeScript |
+| Banco de dados | PostgreSQL (Neon) |
+| Cache / Filas | Redis (Upstash) + BullMQ |
+| Auth | OAuth 2.0 + PKCE |
+| Criptografia | AES-256-GCM (refresh token em repouso) |
+| Deploy | Railway |
 
-## Estrutura do projeto
+---
 
+## Módulos
+
+### `AuthModule`
+Gerencia o fluxo OAuth Authorization Code + PKCE com o Spotify. O `state` e o `code_verifier` são armazenados temporariamente no Redis (TTL 5min) em vez de cookies — evita problemas de `SameSite` em contexto cross-origin em produção.
+
+### `SpotifyModule`
+Client wrapper para a Spotify Web API. Único ponto de contato com a API externa — todos os outros módulos injetam este serviço. Gerencia refresh automático do `access_token` com buffer de 60 segundos antes da expiração e retry automático em caso de rate limit (respeita o header `Retry-After`).
+
+### `SyncModule`
+Job BullMQ repetível que roda a cada 5 minutos por usuário. Usa o timestamp do scrobble mais recente como cursor para o parâmetro `after` do endpoint `recently-played`, garantindo que apenas músicas novas sejam processadas. Dedup por índice único `(trackSpotifyId, playedAt)` no banco.
+
+### `ScrobblesModule`
+Persistência das execuções. A tabela `scrobbles` é desnormalizada — dados de faixa, artista e álbum ficam na própria linha — para que queries de agregação não precisem de joins.
+
+### `StatsModule`
+Endpoints de agregação sobre a tabela de scrobbles. Usa QueryBuilder do TypeORM para controle fino do SQL gerado (GROUP BY, COUNT, EXTRACT, DATE_TRUNC). Todas as queries são filtráveis por período via query param `range`.
+
+---
+
+## Endpoints
+
+### Auth
 ```
-spotify-charts/
-├── docker-compose.yml      # PostgreSQL + Redis
-├── .env.example
-├── src/
-│   ├── main.ts             # bootstrap, cookie-parser, prefixo /api
-│   ├── app.module.ts
-│   ├── auth/
-│   │   ├── auth.controller.ts   # rotas OAuth
-│   │   ├── auth.service.ts      # troca de code, refresh, upsert
-│   │   ├── entities/user.entity.ts
-│   │   └── pkce.util.ts
-│   ├── spotify/
-│   │   └── spotify.service.ts   # cliente da API Spotify
-│   └── common/encryption/
-│       └── encryption.service.ts
-└── test/                   # testes e2e
+GET /api/auth/login     → inicia fluxo OAuth, redireciona pro Spotify
+GET /api/auth/callback  → callback do Spotify, salva tokens e usuário
 ```
 
-## Pré-requisitos
+### Stats
+```
+GET /api/stats/overview?range=month         → dados agregados pro dashboard
+GET /api/stats/top-tracks?range=month       → top faixas por plays
+GET /api/stats/top-artists?range=month      → top artistas por plays
+GET /api/stats/activity/hours?range=month   → plays por hora do dia (0-23)
+GET /api/stats/activity/days?range=month    → plays por dia da semana
+GET /api/stats/activity/timeline?range=month → plays por dia no período
+GET /api/stats/recent?limit=20             → últimas músicas ouvidas
+```
 
+**Valores válidos para `range`:** `week` | `month` | `3months` | `6months` | `year` | `all`
+
+---
+
+## Segurança
+
+- `refresh_token` e `access_token` armazenados criptografados com AES-256-GCM
+- PKCE (`code_challenge` S256) no fluxo OAuth — sem `client_secret` exposto no redirect
+- `state` anti-CSRF armazenado no Redis com TTL de 5 minutos, deletado após uso
+- Rate limiting global via `@nestjs/throttler` (60 req/min por IP)
+- Headers de segurança via Helmet
+- CORS com whitelist de origem
+- `synchronize: false` em produção — schema gerenciado manualmente
+
+---
+
+## Rodando localmente
+
+### Pré-requisitos
 - Node.js 20+
-- npm
-- Docker e Docker Compose (para PostgreSQL e Redis)
-- App registrado no [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+- Docker (para Postgres e Redis locais)
 
-## Instalação
+### Setup
 
 ```bash
-git clone <url-do-repositorio>
-cd spotify-charts
+git clone https://gitlab.com/seu-usuario/wholehearted-stats-api
+cd wholehearted-stats-api
 npm install
-cp .env.example .env
 ```
 
-## Configuração das variáveis de ambiente
+Cria o `.env` na raiz:
 
-Edite o `.env` com base no `.env.example`:
+```env
+# Spotify
+SPOTIFY_CLIENT_ID=seu_client_id
+SPOTIFY_CLIENT_SECRET=seu_client_secret
+SPOTIFY_REDIRECT_URI=http://127.0.0.1:3001/api/auth/callback
 
-| Variável | Descrição |
-|----------|-----------|
-| `SPOTIFY_CLIENT_ID` | Client ID do app Spotify |
-| `SPOTIFY_CLIENT_SECRET` | Client Secret (usado só no backend) |
-| `SPOTIFY_REDIRECT_URI` | URI de callback — deve ser **idêntica** à cadastrada no Dashboard |
-| `ENCRYPTION_KEY` | 64 caracteres hex (32 bytes) para AES-256-GCM |
-| `SESSION_SECRET` | Reservado para sessão de admin (futuro) |
-| `DATABASE_URL` | Connection string PostgreSQL |
-| `REDIS_URL` | Connection string Redis (futuro — filas) |
-| `POSTGRES_*` / `REDIS_PORT` | Usados pelo `docker-compose.yml` |
+# Segurança
+SESSION_SECRET=gere_com_openssl_rand_hex_32
+ENCRYPTION_KEY=gere_com_openssl_rand_hex_32
 
-**Importante — OAuth:**
+# Banco
+POSTGRES_USER=spotify_user
+POSTGRES_PASSWORD=spotify_pass
+POSTGRES_DB=spotify_lastfm
+POSTGRES_PORT=5433
+DATABASE_URL=postgresql://spotify_user:spotify_pass@localhost:5433/spotify_lastfm
 
-1. Cadastre no Spotify Dashboard exatamente: `http://127.0.0.1:3001/api/auth/callback`
-2. Use o mesmo host no `.env` e no navegador (`127.0.0.1`, não `localhost`)
-3. Reinicie o servidor após alterar o `.env`
+# Redis
+REDIS_PORT=6380
+REDIS_URL=redis://localhost:6380
 
-Gere uma chave de criptografia:
-
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+NODE_ENV=development
+PORT=3001
 ```
 
-## Como executar em desenvolvimento
+Sobe a infra local:
 
 ```bash
-# 1. Subir PostgreSQL e Redis
 docker compose up -d
+```
 
-# 2. Iniciar a API
+Inicia o servidor:
+
+```bash
 npm run start:dev
 ```
 
-A API fica em `http://127.0.0.1:3001` (prefixo `/api`).
+Faz o login OAuth uma vez:
 
-### Fluxo de autenticação
-
-1. Abra no navegador: `http://127.0.0.1:3001/api/auth/login`
-2. Autorize no Spotify
-3. Callback retorna:
-
-```json
-{
-  "success": true,
-  "user": "Seu Nome no Spotify"
-}
+```
+http://127.0.0.1:3001/api/auth/login
 ```
 
-## Como executar testes
+A partir daí o BullMQ começa a fazer polling automaticamente a cada 5 minutos.
 
-```bash
-# unitários
-npm test
+---
 
-# e2e
-npm run test:e2e
+## Variáveis de ambiente (produção)
 
-# cobertura
-npm run test:cov
-```
-
-## Como executar em produção
-
-```bash
-npm run build
-npm run start:prod
-```
-
-Defina `NODE_ENV=production` (cookies OAuth passam a usar flag `secure`). Desative `synchronize` no TypeORM e use migrations.
-
-## Docker / Docker Compose
-
-O Compose sobe apenas dependências — a aplicação Nest roda localmente via npm:
-
-```bash
-docker compose up -d
-```
-
-| Serviço | Container | Porta padrão (.env) |
-|---------|-----------|---------------------|
-| PostgreSQL | `spotify_lastfm_db` | `5433` |
-| Redis | `spotify_lastfm_redis` | `6380` |
-
-```bash
-docker compose down      # parar
-docker compose logs -f   # logs
-```
-
-## Scripts disponíveis
-
-| Script | Descrição |
-|--------|-----------|
-| `npm run start:dev` | Desenvolvimento com hot reload |
-| `npm run start:debug` | Debug com watch |
-| `npm run build` | Compila para `dist/` |
-| `npm run start:prod` | Executa build de produção |
-| `npm run lint` | ESLint + fix |
-| `npm run format` | Prettier |
-| `npm test` | Jest (unitários) |
-| `npm run test:e2e` | Testes end-to-end |
-
-## Exemplos de uso / API
-
-Todas as rotas têm prefixo `/api`.
-
-### Health check (scaffold)
-
-```http
-GET /api
-```
-
-### Iniciar login Spotify
-
-```http
-GET /api/auth/login
-```
-
-- **Entrada:** nenhum body ou query param
-- **Resposta:** redirect `302` para `accounts.spotify.com`
-- **Cookies setados:** `spotify_verifier`, `spotify_state` (5 min, `httpOnly`)
-
-### Callback OAuth (automático após autorizar)
-
-```http
-GET /api/auth/callback?code={code}&state={state}
-```
-
-**Sucesso (200):**
-
-```json
-{ "success": true, "user": "Display Name" }
-```
-
-**Erros comuns:**
-
-| Resposta | Causa provável |
-|----------|----------------|
-| `{ "error": "state_mismatch" }` | Host diferente entre login e callback (`localhost` vs `127.0.0.1`) |
-| `redirect_uri: Not matching configuration` | URI do `.env` ≠ URI cadastrada no Spotify Dashboard |
-| `Cannot GET /auth/login` | URL sem prefixo `/api` |
-
-### SpotifyService (interno — sem rota HTTP ainda)
-
-Métodos disponíveis para uso em módulos futuros:
-
-- `getRecentlyPlayed(limit?, after?)`
-- `getTopTracks(timeRange?, limit?)`
-- `getTopArtists(timeRange?, limit?)`
-- `getCurrentlyPlaying()`
-
-## Performance e escala
-
-Estado atual: API single-user, consultas síncronas à Spotify API com retry em 429.
-
-Direção prevista:
-
-- **BullMQ + Redis**: sync incremental do histórico sem bloquear requests HTTP
-- **Agregações no PostgreSQL**: charts servidos do banco, não da API em tempo real
-- **Throttling**: proteção de endpoints públicos quando expostos
-
-Sem benchmarks ou carga medida nesta fase.
-
-## Como contribuir
-
-1. Fork e branch a partir de `main`
-2. Siga o estilo existente (Prettier + ESLint)
-3. Descreva mudanças de OAuth/segurança no PR
-4. Abra PR com contexto e passos de teste
-
-## Licença
-
-UNLICENSED — uso privado. Ver `package.json`.
+| Variável | Descrição |
+|---|---|
+| `SPOTIFY_CLIENT_ID` | Client ID do app no Spotify Developer |
+| `SPOTIFY_CLIENT_SECRET` | Client Secret do app no Spotify Developer |
+| `SPOTIFY_REDIRECT_URI` | URL de callback registrada no Spotify |
+| `SESSION_SECRET` | Secret pra assinar sessões (32 bytes hex) |
+| `ENCRYPTION_KEY` | Chave AES-256 pra criptografar tokens (32 bytes hex) |
+| `DATABASE_URL` | Connection string do PostgreSQL |
+| `REDIS_URL` | Connection string do Redis |
+| `FRONTEND_URL` | URL do frontend (pra CORS) |
+| `NODE_ENV` | `production` em produção |
+| `PORT` | Porta do servidor (padrão: 3001) |
