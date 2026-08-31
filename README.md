@@ -14,6 +14,19 @@ A API autentica com o Spotify via OAuth + PKCE, armazena o refresh token criptog
 
 ---
 
+## Sobre o acesso
+
+Este é um dashboard pessoal público — os dados exibidos são do próprio dono da instância.
+Visitantes não precisam de conta no Spotify para acessar: os dados já estão agregados
+e servidos pela API própria.
+
+Para rodar sua própria instância, clone o repositório, crie um app no
+[Spotify Developer Dashboard](https://developer.spotify.com/dashboard),
+configure as variáveis de ambiente e faça o login OAuth uma vez.
+A partir daí o sistema rastreia sua escuta automaticamente.
+
+---
+
 ## Arquitetura
 
 ```
