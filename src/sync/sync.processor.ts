@@ -30,7 +30,7 @@ export class SyncProcessor extends WorkerHost {
     }
 
     const userId = user.id;
-    this.logger.log(`Iniciando sync para usuário ${userId}...`);
+    this.logger.log(`Iniciando sync para usuário ...${userId.slice(-4)}`);
 
     // busca o scrobble mais recente desse usuário específico
     const latest = await this.scrobbleRepo.findOne({
