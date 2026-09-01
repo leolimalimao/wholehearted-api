@@ -6,6 +6,9 @@ export class Scrobble {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
+  @Column({ nullable: true })
+  userId!: string;
+
   @Column()
   trackSpotifyId!: string;
 
