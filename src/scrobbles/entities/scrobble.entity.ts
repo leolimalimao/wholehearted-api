@@ -1,12 +1,12 @@
 import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
 @Entity('scrobbles')
-@Index(['trackSpotifyId', 'playedAt'], { unique: true }) // chave de dedup
+@Index(['trackSpotifyId', 'playedAt', 'userId'], { unique: true })
 export class Scrobble {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ nullable: true })
+  @Column({ name: 'user_id', nullable: false })
   userId!: string;
 
   @Column()
