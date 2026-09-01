@@ -5,6 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SpotifyService } from '../spotify/spotify.service';
 import { Scrobble } from '../scrobbles/entities/scrobble.entity';
+import { User } from '../auth/entities/user.entity';
 
 export const SYNC_QUEUE = 'sync';
 
@@ -15,17 +16,25 @@ export class SyncProcessor extends WorkerHost {
   constructor(
     private spotifyService: SpotifyService,
     @InjectRepository(Scrobble) private scrobbleRepo: Repository<Scrobble>,
+    @InjectRepository(User) private userRepo: Repository<User>,
   ) {
     super();
   }
 
-  async process(job: Job) {
-    this.logger.log('Iniciando sync de recently-played...');
+  async process(_job: Job) {
+    // multi-tenant: virá como job.data.userId
+    const user = await this.userRepo.findOne({ where: {} });
+    if (!user) {
+      this.logger.warn('Nenhum usuário encontrado — pulando sync.');
+      return;
+    }
 
-    // Busca o timestamp do scrobble mais recente no banco
-    // pra usar como cursor (evita repuxar tudo toda vez)
+    const userId = user.id;
+    this.logger.log(`Iniciando sync para usuário ${userId}...`);
+
+    // busca o scrobble mais recente desse usuário específico
     const latest = await this.scrobbleRepo.findOne({
-      where: {},
+      where: { userId },
       order: { playedAt: 'DESC' },
     });
 
@@ -45,9 +54,9 @@ export class SyncProcessor extends WorkerHost {
     for (const item of data.items) {
       const playedAt = new Date(item.played_at);
 
-      // Dedup: ignora se já existe esse track nesse timestamp exato
       const exists = await this.scrobbleRepo.findOne({
         where: {
+          userId,
           trackSpotifyId: item.track.id,
           playedAt,
         },
@@ -57,6 +66,7 @@ export class SyncProcessor extends WorkerHost {
 
       await this.scrobbleRepo.save(
         this.scrobbleRepo.create({
+          userId,
           trackSpotifyId: item.track.id,
           trackName: item.track.name,
           artistName: item.track.artists[0]?.name ?? 'Desconhecido',
