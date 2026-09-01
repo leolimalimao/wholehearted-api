@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
+import { JwtAuthModule } from './common/jwt/jwt.module';
 import { AuthModule } from './auth/auth.module';
 import { SpotifyModule } from './spotify/spotify.module';
 import { ScrobblesModule } from './scrobbles/scrobbles.module';
@@ -44,6 +45,7 @@ import { APP_GUARD } from '@nestjs/core';
         limit: 60,   // máximo 60 requests por janela por IP
       }
     ]),
+    JwtAuthModule,
     AuthModule,
     SpotifyModule,
     ScrobblesModule,
