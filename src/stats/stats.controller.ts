@@ -11,18 +11,19 @@ function parseRange(range: string): TimeRange {
 
 @Controller('stats')
 export class StatsController {
+  private cachedUserId: string | null = null;
+
   constructor(
     private statsService: StatsService,
     @InjectRepository(User) private userRepo: Repository<User>,
   ) {}
 
-  // único método que muda quando vier multi-tenant
-  // hoje: busca o único usuário do banco
-  // futuro: return req.user.id (vindo do AuthGuard)
   private async resolveUserId(): Promise<string> {
+    if (this.cachedUserId) return this.cachedUserId;
     const user = await this.userRepo.findOne({ where: {} });
     if (!user) throw new NotFoundException('Nenhum usuário autenticado');
-    return user.id;
+    this.cachedUserId = user.id;
+    return this.cachedUserId;
   }
 
   @Get('overview')
