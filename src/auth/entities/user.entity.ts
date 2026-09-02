@@ -1,4 +1,4 @@
-import { Column, Entity, PrimaryGeneratedColumn, CreateDateColumn } from 'typeorm';
+import { Column, Entity, PrimaryGeneratedColumn, CreateDateColumn, Index } from 'typeorm';
 
 @Entity('users')
 export class User {
@@ -10,6 +10,10 @@ export class User {
 
   @Column()
   displayName!: string;
+
+  @Column({ unique: true })
+  @Index()
+  slug!: string; // novo campo — único e indexado pra busca rápida por URL
 
   @Column({ type: 'text' })
   encryptedRefreshToken!: string;

@@ -9,6 +9,7 @@ import { ScrobblesModule } from './scrobbles/scrobbles.module';
 import { SyncModule } from './sync/sync.module';
 import { StatsModule } from './stats/stats.module';
 import { RedisModule } from './common/redis/redis.module';
+import { PublicModule } from './public/public.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
@@ -53,6 +54,7 @@ import { APP_GUARD } from '@nestjs/core';
     SyncModule,
     StatsModule,
     RedisModule,
+    PublicModule,
   ],
   providers: [
     AuthGuard,

@@ -72,6 +72,7 @@ export class AuthController {
     const jwt = this.jwtAuth.sign({
       userId:    user.id,
       spotifyId: profile.id,
+      slug:      user.slug,
     });
 
     const isProduction = this.config.get('NODE_ENV') === 'production';

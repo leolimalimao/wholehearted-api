@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 export interface JwtPayload {
   userId: string;
   spotifyId: string;
+  slug: string;
 }
 
 @Injectable()
