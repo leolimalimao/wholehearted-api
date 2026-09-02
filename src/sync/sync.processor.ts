@@ -47,7 +47,11 @@ export class SyncProcessor extends WorkerHost {
       ? new Date(latest.playedAt).getTime()
       : undefined;
 
-    const data = await this.spotifyService.getRecentlyPlayed(50, afterCursor);
+    const data = await this.spotifyService.getRecentlyPlayed(
+      userId,
+      50,
+      afterCursor,
+    );
 
     if (!data?.items?.length) {
       this.logger.log('Nenhuma música nova encontrada.');
@@ -69,10 +73,10 @@ export class SyncProcessor extends WorkerHost {
         this.scrobbleRepo.create({
           userId,
           trackSpotifyId: item.track.id,
-          trackName:      item.track.name,
-          artistName:     item.track.artists[0]?.name ?? 'Desconhecido',
-          albumName:      item.track.album.name,
-          albumImageUrl:  item.track.album.images[0]?.url ?? null,
+          trackName: item.track.name,
+          artistName: item.track.artists[0]?.name ?? 'Desconhecido',
+          albumName: item.track.album.name,
+          albumImageUrl: item.track.album.images[0]?.url ?? null,
           playedAt,
         }),
       );
