@@ -21,18 +21,23 @@ export class SyncProcessor extends WorkerHost {
     super();
   }
 
-  async process(_job: Job) {
-    // multi-tenant: virá como job.data.userId
-    const user = await this.userRepo.findOne({ where: {} });
-    if (!user) {
-      this.logger.warn('Nenhum usuário encontrado — pulando sync.');
+  async process(job: Job<{ userId: string }>) {
+    const userId = job.data?.userId;
+
+    if (!userId) {
+      this.logger.warn('Job sem userId no payload — ignorando.');
       return;
     }
 
-    const userId = user.id;
+    // busca o usuário pra ter o refresh_token disponível pro SpotifyService
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) {
+      this.logger.warn(`Usuário ...${userId.slice(-4)} não encontrado — ignorando.`);
+      return;
+    }
+
     this.logger.log(`Iniciando sync para usuário ...${userId.slice(-4)}`);
 
-    // busca o scrobble mais recente desse usuário específico
     const latest = await this.scrobbleRepo.findOne({
       where: { userId },
       order: { playedAt: 'DESC' },
@@ -55,11 +60,7 @@ export class SyncProcessor extends WorkerHost {
       const playedAt = new Date(item.played_at);
 
       const exists = await this.scrobbleRepo.findOne({
-        where: {
-          userId,
-          trackSpotifyId: item.track.id,
-          playedAt,
-        },
+        where: { userId, trackSpotifyId: item.track.id, playedAt },
       });
 
       if (exists) continue;
@@ -68,10 +69,10 @@ export class SyncProcessor extends WorkerHost {
         this.scrobbleRepo.create({
           userId,
           trackSpotifyId: item.track.id,
-          trackName: item.track.name,
-          artistName: item.track.artists[0]?.name ?? 'Desconhecido',
-          albumName: item.track.album.name,
-          albumImageUrl: item.track.album.images[0]?.url ?? null,
+          trackName:      item.track.name,
+          artistName:     item.track.artists[0]?.name ?? 'Desconhecido',
+          albumName:      item.track.album.name,
+          albumImageUrl:  item.track.album.images[0]?.url ?? null,
           playedAt,
         }),
       );

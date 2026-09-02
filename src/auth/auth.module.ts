@@ -5,9 +5,10 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { User } from './entities/user.entity';
 import { EncryptionService } from '../common/encryption/encryption.service';
+import { SyncModule } from '../sync/sync.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User]), HttpModule],
+  imports: [TypeOrmModule.forFeature([User]), HttpModule, SyncModule],
   controllers: [AuthController],
   providers: [AuthService, EncryptionService],
   exports: [AuthService],

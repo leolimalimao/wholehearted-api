@@ -4,6 +4,7 @@ import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RedisService } from '../common/redis/redis.service';
 import { JwtAuthService } from '../common/jwt/jwt.service';
+import { SyncService } from '../sync/sync.service';
 import { generateCodeVerifier, generateCodeChallenge, generateState } from './pkce.util';
 
 @Controller('auth')
@@ -13,6 +14,7 @@ export class AuthController {
     private config: ConfigService,
     private redis: RedisService,
     private jwtAuth: JwtAuthService,
+    private syncService: SyncService, //injeta SyncService
   ) {}
 
   @Get('login')
@@ -62,6 +64,9 @@ export class AuthController {
     const tokens  = await this.authService.exchangeCodeForTokens(code, codeVerifier);
     const profile = await this.authService.fetchSpotifyProfile(tokens.access_token);
     const user    = await this.authService.upsertUser(profile, tokens);
+
+    // registra ou atualiza o job de sync do user
+    await this.syncService.registerSyncForUser(user.id);
 
     // gera JWT com userId e spotifyId
     const jwt = this.jwtAuth.sign({

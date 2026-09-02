@@ -15,5 +15,6 @@ import { User } from '../auth/entities/user.entity';
     SpotifyModule,
   ],
   providers: [SyncService, SyncProcessor],
+  exports: [SyncService], // exporta pra o AuthModule usar
 })
 export class SyncModule {}
