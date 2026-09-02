@@ -15,13 +15,13 @@ export class AuthController {
     private redis: RedisService,
     private jwtAuth: JwtAuthService,
     private syncService: SyncService, //injeta SyncService
-  ) {}
+  ) { }
 
   @Get('login')
   async login(@Res() res: Response) {
-    const codeVerifier  = generateCodeVerifier();
+    const codeVerifier = generateCodeVerifier();
     const codeChallenge = generateCodeChallenge(codeVerifier);
-    const state         = generateState();
+    const state = generateState();
 
     await this.redis.set(`oauth:${state}:verifier`, codeVerifier, 300);
 
@@ -32,13 +32,13 @@ export class AuthController {
     ];
 
     const params = new URLSearchParams({
-      response_type:         'code',
-      client_id:             this.config.getOrThrow('SPOTIFY_CLIENT_ID'),
-      scope:                 scopes.join(' '),
-      redirect_uri:          this.config.getOrThrow('SPOTIFY_REDIRECT_URI'),
+      response_type: 'code',
+      client_id: this.config.getOrThrow('SPOTIFY_CLIENT_ID'),
+      scope: scopes.join(' '),
+      redirect_uri: this.config.getOrThrow('SPOTIFY_REDIRECT_URI'),
       state,
       code_challenge_method: 'S256',
-      code_challenge:        codeChallenge,
+      code_challenge: codeChallenge,
     });
 
     res.redirect(`https://accounts.spotify.com/authorize?${params.toString()}`);
@@ -49,7 +49,7 @@ export class AuthController {
     @Query() query: Record<string, string>,
     @Res() res: Response,
   ) {
-    const code  = query['code'];
+    const code = query['code'];
     const state = query['state'];
     const error = query['error'];
 
@@ -61,18 +61,18 @@ export class AuthController {
 
     await this.redis.del(`oauth:${state}:verifier`);
 
-    const tokens  = await this.authService.exchangeCodeForTokens(code, codeVerifier);
+    const tokens = await this.authService.exchangeCodeForTokens(code, codeVerifier);
     const profile = await this.authService.fetchSpotifyProfile(tokens.access_token);
-    const user    = await this.authService.upsertUser(profile, tokens);
+    const user = await this.authService.upsertUser(profile, tokens);
 
     // registra ou atualiza o job de sync do user
     await this.syncService.registerSyncForUser(user.id);
 
     // gera JWT com userId e spotifyId
     const jwt = this.jwtAuth.sign({
-      userId:    user.id,
+      userId: user.id,
       spotifyId: profile.id,
-      slug:      user.slug,
+      slug: user.slug,
     });
 
     const isProduction = this.config.get('NODE_ENV') === 'production';
@@ -80,9 +80,9 @@ export class AuthController {
     // seta cookie httpOnly — nunca acessível via JavaScript no browser
     res.cookie('session', jwt, {
       httpOnly: true,
-      secure:   isProduction,
+      secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
-      maxAge:   7 * 24 * 60 * 60 * 1000, // 7 dias em ms
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 dias em ms
     });
 
     // redireciona pro frontend em vez de retornar JSON
@@ -98,7 +98,11 @@ export class AuthController {
 
     try {
       const payload = this.jwtAuth.verify(token);
-      return { authenticated: true, spotifyId: payload.spotifyId };
+      return {
+        authenticated: true,
+        spotifyId: payload.spotifyId,
+        slug: payload.slug, // adiciona slug
+      };
     } catch {
       return { authenticated: false };
     }
@@ -110,7 +114,7 @@ export class AuthController {
     const isProduction = process.env.NODE_ENV === 'production';
     res.clearCookie('session', {
       httpOnly: true,
-      secure:   isProduction,
+      secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
     });
     return res.json({ success: true });
