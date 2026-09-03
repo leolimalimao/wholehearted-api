@@ -8,5 +8,6 @@ import { Scrobble } from '../scrobbles/entities/scrobble.entity';
   imports: [TypeOrmModule.forFeature([Scrobble])],
   controllers: [StatsController],
   providers: [StatsService],
+  exports: [StatsService],
 })
 export class StatsModule {}

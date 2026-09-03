@@ -12,43 +12,35 @@ export class StatsService {
     private scrobbleRepo: Repository<Scrobble>,
   ) {}
 
-  // Converte o timeRange em um Date de corte.
-  // Todas as queries de período vão usar isso como ponto de partida.
   private getStartDate(range: TimeRange): Date | null {
     const now = new Date();
     const map: Record<TimeRange, number | null> = {
-      week: 7,
-      month: 30,
-      '3months': 90,
-      '6months': 180,
-      year: 365,
-      all: null,
+      week: 7, month: 30, '3months': 90,
+      '6months': 180, year: 365, all: null,
     };
     const days = map[range];
     if (days === null) return null;
     return new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
   }
 
-  // Aplica o filtro de data no QueryBuilder se necessário.
-  // Centralizar isso evita repetir o mesmo bloco em cada query.
-  private applyDateFilter(qb: any, range: TimeRange, alias = 's') {
+  // userId sempre é o primeiro filtro — garante isolamento de dados
+  // quando vier multi-tenant, nada muda aqui
+  private applyFilters(qb: any, userId: string, range: TimeRange, alias = 's') {
+    qb.where(`${alias}.userId = :userId`, { userId });
     const start = this.getStartDate(range);
     if (start) {
-      qb.where(`${alias}.playedAt >= :start`, { start });
+      qb.andWhere(`${alias}.playedAt >= :start`, { start });
     }
     return qb;
   }
 
-  // Total de scrobbles no período — número simples que vai pro topo do dashboard
-  async getTotalScrobbles(range: TimeRange = 'all'): Promise<number> {
+  async getTotalScrobbles(userId: string, range: TimeRange = 'all') {
     const qb = this.scrobbleRepo.createQueryBuilder('s');
-    this.applyDateFilter(qb, range);
+    this.applyFilters(qb, userId, range);
     return qb.getCount();
   }
 
-  // Top faixas: agrupa por nome da faixa + artista e conta quantas vezes aparece.
-  // O alias "plays" é o que o front vai usar pra montar o gráfico de barras.
-  async getTopTracks(range: TimeRange = 'month', limit = 10) {
+  async getTopTracks(userId: string, range: TimeRange = 'month', limit = 10) {
     const qb = this.scrobbleRepo
       .createQueryBuilder('s')
       .select('s.trackSpotifyId', 'trackSpotifyId')
@@ -63,12 +55,11 @@ export class StatsService {
       .orderBy('plays', 'DESC')
       .limit(limit);
 
-    this.applyDateFilter(qb, range);
+    this.applyFilters(qb, userId, range);
     return qb.getRawMany();
   }
 
-  // Top artistas: mesma lógica, mas agrupa só por artista.
-  async getTopArtists(range: TimeRange = 'month', limit = 10) {
+  async getTopArtists(userId: string, range: TimeRange = 'month', limit = 10) {
     const qb = this.scrobbleRepo
       .createQueryBuilder('s')
       .select('s.artistName', 'artistName')
@@ -77,57 +68,62 @@ export class StatsService {
       .orderBy('plays', 'DESC')
       .limit(limit);
 
-    this.applyDateFilter(qb, range);
+    this.applyFilters(qb, userId, range);
     return qb.getRawMany();
   }
 
-  // Atividade por hora do dia (0–23): útil pra mostrar em que hora você mais ouve música.
-  // EXTRACT(HOUR FROM ...) é SQL padrão do Postgres — extrai só a hora do timestamp.
-  async getActivityByHour(range: TimeRange = 'month') {
+  async getActivityByHour(userId: string, range: TimeRange = 'month') {
     const qb = this.scrobbleRepo
       .createQueryBuilder('s')
-      .select('EXTRACT(HOUR FROM s.playedAt AT TIME ZONE \'America/Sao_Paulo\')', 'hour')
+      .select(`EXTRACT(HOUR FROM s.playedAt AT TIME ZONE 'America/Sao_Paulo')`, 'hour')
       .addSelect('COUNT(*)', 'plays')
       .groupBy('hour')
       .orderBy('hour', 'ASC');
 
-    this.applyDateFilter(qb, range);
+    this.applyFilters(qb, userId, range);
     return qb.getRawMany();
   }
 
-  // Atividade por dia da semana (0=domingo, 6=sábado).
-  // Combinado com o heatmap de hora, dá uma visão completa do seu padrão de escuta.
-  async getActivityByDayOfWeek(range: TimeRange = 'month') {
+  async getActivityByDayOfWeek(userId: string, range: TimeRange = 'month') {
     const qb = this.scrobbleRepo
       .createQueryBuilder('s')
-      .select('EXTRACT(DOW FROM s.playedAt AT TIME ZONE \'America/Sao_Paulo\')', 'dow')
+      .select(`EXTRACT(DOW FROM s.playedAt AT TIME ZONE 'America/Sao_Paulo')`, 'dow')
       .addSelect('COUNT(*)', 'plays')
       .groupBy('dow')
       .orderBy('dow', 'ASC');
 
-    this.applyDateFilter(qb, range);
+    this.applyFilters(qb, userId, range);
     return qb.getRawMany();
   }
 
-  // Scrobbles por dia num período: alimenta o gráfico de linha de atividade ao longo do tempo.
-  // DATE_TRUNC trunca o timestamp pra só a data (sem hora), agrupando tudo do mesmo dia.
-  async getScrobblesPerDay(range: TimeRange = 'month') {
+  async getScrobblesPerDay(userId: string, range: TimeRange = 'month') {
     const qb = this.scrobbleRepo
       .createQueryBuilder('s')
-      .select('DATE_TRUNC(\'day\', s.playedAt AT TIME ZONE \'America/Sao_Paulo\')', 'date')
+      .select(`DATE_TRUNC('day', s.playedAt AT TIME ZONE 'America/Sao_Paulo')`, 'date')
       .addSelect('COUNT(*)', 'plays')
       .groupBy('date')
       .orderBy('date', 'ASC');
 
-    this.applyDateFilter(qb, range);
+    this.applyFilters(qb, userId, range);
     return qb.getRawMany();
   }
 
-  // Músicas ouvidas recentemente — pra montar o feed "últimas escutadas" do dashboard.
-  async getRecentScrobbles(limit = 20) {
+  async getRecentScrobbles(userId: string, limit = 20) {
     return this.scrobbleRepo.find({
+      where: { userId },
       order: { playedAt: 'DESC' },
       take: limit,
     });
+  }
+
+  // overview agrega tudo numa chamada — usado pelo dashboard principal
+  async getOverview(userId: string, range: TimeRange = 'month') {
+    const [total, topTracks, topArtists, perDay] = await Promise.all([
+      this.getTotalScrobbles(userId, range),
+      this.getTopTracks(userId, range, 10),
+      this.getTopArtists(userId, range, 10),
+      this.getScrobblesPerDay(userId, range),
+    ]);
+    return { total, topTracks, topArtists, perDay };
   }
 }

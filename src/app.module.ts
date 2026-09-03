@@ -2,12 +2,15 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
+import { JwtAuthModule } from './common/jwt/jwt.module';
 import { AuthModule } from './auth/auth.module';
 import { SpotifyModule } from './spotify/spotify.module';
 import { ScrobblesModule } from './scrobbles/scrobbles.module';
 import { SyncModule } from './sync/sync.module';
 import { StatsModule } from './stats/stats.module';
 import { RedisModule } from './common/redis/redis.module';
+import { PublicModule } from './public/public.module';
+import { AuthGuard } from './common/guards/auth.guard';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 
@@ -44,14 +47,17 @@ import { APP_GUARD } from '@nestjs/core';
         limit: 60,   // máximo 60 requests por janela por IP
       }
     ]),
+    JwtAuthModule,
     AuthModule,
     SpotifyModule,
     ScrobblesModule,
     SyncModule,
     StatsModule,
     RedisModule,
+    PublicModule,
   ],
   providers: [
+    AuthGuard,
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,

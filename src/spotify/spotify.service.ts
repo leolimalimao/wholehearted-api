@@ -19,33 +19,43 @@ export class SpotifyService {
     @InjectRepository(User) private userRepo: Repository<User>,
     private authService: AuthService,
     private encryption: EncryptionService,
-  ) {}
+  ) { }
 
-  // Busca o único usuário do banco (você)
-  private async getUser(): Promise<User> {
-    const user = await this.userRepo.findOne({ where: {} });
-    if (!user) throw new Error('Nenhum usuário autenticado encontrado.');
+  private async getUser(userId: string): Promise<User> {
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new Error(`Usuário ${userId} não encontrado.`);
+    }
+
     return user;
   }
 
   // Garante que o access_token está válido, renovando se necessário
-  private async getValidAccessToken(): Promise<string> {
-    const user = await this.getUser();
+  private async getValidAccessToken(userId: string): Promise<string> {
+    const user = await this.getUser(userId);
+
     const now = new Date();
     const expiresAt = new Date(user.accessTokenExpiresAt);
     const bufferMs = 60 * 1000;
-  
+
     if (expiresAt.getTime() - now.getTime() < bufferMs) {
-      this.logger.log('Access token expirado — renovando...');
+      this.logger.log(`Access token expirado — renovando para ...${userId.slice(-4)}`);
       return this.authService.refreshAccessToken(user);
     }
-  
+
     return this.encryption.decrypt(user.encryptedAccessToken);
   }
 
   // Método central de request com tratamento de rate limit e refresh
-  async get<T = any>(endpoint: string, params?: Record<string, string>): Promise<T> {
-    const token = await this.getValidAccessToken();
+  async get<T = any>(
+    userId: string,
+    endpoint: string,
+    params?: Record<string, string>,
+  ): Promise<T> {
+    const token = await this.getValidAccessToken(userId);
 
     const makeRequest = async (accessToken: string) =>
       firstValueFrom(
@@ -83,23 +93,25 @@ export class SpotifyService {
 
   // --- Endpoints da Spotify API ---
 
-  getRecentlyPlayed(limit = 50, after?: number) {
-    const params: Record<string, string> = { limit: String(limit) };
+  getRecentlyPlayed(userId: string, limit = 50, after?: number) {
+    const params: Record<string, string> = {
+      limit: String(limit),
+    };
+
     if (after) params.after = String(after);
-    return this.get<SpotifyRecentlyPlayedResponse>('/me/player/recently-played', params);
+
+    return this.get<SpotifyRecentlyPlayedResponse>(
+      userId,
+      '/me/player/recently-played',
+      params,
+    );
   }
 
-  getTopTracks(timeRange: 'short_term' | 'medium_term' | 'long_term' = 'medium_term', limit = 50) {
-    return this.get('/me/top/tracks', { time_range: timeRange, limit: String(limit) });
-  }
+  getTopTracks(userId: string, timeRange: 'short_term' | 'medium_term' | 'long_term' = 'medium_term', limit = 50,) { return this.get(userId, '/me/top/tracks', { time_range: timeRange, limit: String(limit), },); }
 
-  getTopArtists(timeRange: 'short_term' | 'medium_term' | 'long_term' = 'medium_term', limit = 50) {
-    return this.get('/me/top/artists', { time_range: timeRange, limit: String(limit) });
-  }
+  getTopArtists(userId: string, timeRange: 'short_term' | 'medium_term' | 'long_term' = 'medium_term', limit = 50,) { return this.get(userId, '/me/top/artists', { time_range: timeRange, limit: String(limit), },); }
 
-  getCurrentlyPlaying() {
-    return this.get('/me/player/currently-playing');
-  }
+  getCurrentlyPlaying(userId: string) { return this.get(userId, '/me/player/currently-playing',); }
 }
 
 // Tipos básicos que vamos usar no SyncModule
