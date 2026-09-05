@@ -29,14 +29,14 @@ export class SyncService implements OnModuleInit {
     }
   
     for (const user of users) {
-      await this.registerSyncForUser(user.id, false); // false = sem disparo imediato
+      await this.registerSyncForUser(user.id);
     }
   
     this.logger.log(`${users.length} job(s) de sync registrado(s).`);
   }
   
   // parâmetro fireImmediate controla se dispara agora
-  async registerSyncForUser(userId: string, fireImmediate = true) {
+  async registerSyncForUser(userId: string) {
     await this.syncQueue.upsertJobScheduler(
       `recently-played-sync:${userId}`,
       { every: 10 * 60 * 1000 },
@@ -44,24 +44,14 @@ export class SyncService implements OnModuleInit {
         name: 'recently-played-sync',
         data: { userId },
         opts: {
-          removeOnComplete: 5,
-          removeOnFail: 3,
+          removeOnComplete: 3,
+          removeOnFail: 2,
           attempts: 2,
           backoff: { type: 'exponential', delay: 30000 },
         },
       },
     );
   
-    // disparo imediato só quando vem do login
-    if (fireImmediate) {
-      await this.syncQueue.add(
-        'recently-played-sync-now',
-        { userId },
-        { removeOnComplete: true, removeOnFail: true },
-      );
-      this.logger.log(`Job registrado + sync imediato para usuário ...${userId.slice(-4)}`);
-    } else {
-      this.logger.log(`Job registrado para usuário ...${userId.slice(-4)} (intervalo: 10min)`);
-    }
+    this.logger.log(`Job registrado para usuário ...${userId.slice(-4)}`);
   }
 }
