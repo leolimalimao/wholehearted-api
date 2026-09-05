@@ -37,14 +37,18 @@ import { APP_GUARD } from '@nestjs/core';
             port: parseInt(url.port),
             password: url.password,
             tls: redisUrl.startsWith('rediss://') ? {} : undefined,
+            enableOfflineQueue: false,
+            maxRetriesPerRequest: 3,
+            connectTimeout: 10000,
+            lazyConnect: true,
           },
         };
       },
     }),
     ThrottlerModule.forRoot([
       {
-        ttl: 60000,  // janela de 60 segundos
-        limit: 60,   // máximo 60 requests por janela por IP
+        ttl: 60000,
+        limit: 60,
       }
     ]),
     JwtAuthModule,
