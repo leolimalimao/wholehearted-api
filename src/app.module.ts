@@ -38,7 +38,7 @@ import { APP_GUARD } from '@nestjs/core';
             password: url.password,
             tls: redisUrl.startsWith('rediss://') ? {} : undefined,
             enableOfflineQueue: false,
-            maxRetriesPerRequest: 3,
+            maxRetriesPerRequest: null,
             connectTimeout: 10000,
             lazyConnect: true,
           },
