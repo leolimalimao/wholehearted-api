@@ -13,7 +13,7 @@ export class SyncService implements OnModuleInit {
   constructor(
     @InjectQueue(SYNC_QUEUE) private syncQueue: Queue,
     @InjectRepository(User) private userRepo: Repository<User>,
-  ) {}
+  ) { }
 
   async onModuleInit() {
     // remove todos os schedulers antigos e evita duplicar ao reiniciar
@@ -41,21 +41,33 @@ export class SyncService implements OnModuleInit {
   // registra ou atualiza o job daquele usuário específico
   async registerSyncForUser(userId: string) {
     await this.syncQueue.upsertJobScheduler(
-      `recently-played-sync:${userId}`, // chave única por usuário
-      { every: 5 * 60 * 1000 },
+      `recently-played-sync:${userId}`,
+      { every: 10 * 60 * 1000 }, // 10 minutos em vez de 5
       {
         name: 'recently-played-sync',
-        data: { userId }, // userId no payload do job
+        data: { userId },
         opts: {
-          removeOnComplete: 10,
-          removeOnFail: 5,
+          removeOnComplete: 5,  // guarda menos histórico
+          removeOnFail: 3,
+          attempts: 2,          // tenta 2x antes de falhar
+          backoff: {
+            type: 'exponential',
+            delay: 30000,       // espera 30s antes de tentar de novo
+          },
         },
       },
     );
 
-    // disparo imediato pra não esperar 5min no primeiro sync
-    await this.syncQueue.add('recently-played-sync-now', { userId });
+    // disparo imediato ao subir depois entra no intervalo de 10min
+    await this.syncQueue.add(
+      'recently-played-sync-now',
+      { userId },
+      {
+        removeOnComplete: true,
+        removeOnFail: true,
+      },
+    );
 
-    this.logger.log(`Job registrado para usuário ...${userId.slice(-4)}`);
+    this.logger.log(`Job registrado para usuário ...${userId.slice(-4)} (intervalo: 10min)`);
   }
 }

@@ -9,7 +9,11 @@ import { User } from '../auth/entities/user.entity';
 
 export const SYNC_QUEUE = 'sync';
 
-@Processor(SYNC_QUEUE)
+@Processor(SYNC_QUEUE, {
+  stalledInterval: 120000,  // checa jobs travados a cada 2min (padrão 30s)
+  maxStalledCount: 1,       // remove job travado após 1 tentativa
+  concurrency: 1,         
+})
 export class SyncProcessor extends WorkerHost {
   private readonly logger = new Logger(SyncProcessor.name);
 
