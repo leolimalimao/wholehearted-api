@@ -40,7 +40,6 @@ import { APP_GUARD } from '@nestjs/core';
             enableOfflineQueue: false,
             maxRetriesPerRequest: null,
             connectTimeout: 10000,
-            lazyConnect: true,
           },
         };
       },
