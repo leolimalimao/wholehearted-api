@@ -4,6 +4,7 @@ import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SpotifyService } from '../spotify/spotify.service';
+import { CacheService } from '../common/cache/cache.service';
 import { Scrobble } from '../scrobbles/entities/scrobble.entity';
 import { User } from '../auth/entities/user.entity';
 
@@ -21,6 +22,7 @@ export class SyncProcessor extends WorkerHost {
     private spotifyService: SpotifyService,
     @InjectRepository(Scrobble) private scrobbleRepo: Repository<Scrobble>,
     @InjectRepository(User) private userRepo: Repository<User>,
+    private cache: CacheService,
   ) {
     super();
   }
@@ -88,6 +90,18 @@ export class SyncProcessor extends WorkerHost {
       inserted++;
     }
 
+    this.logger.log(`Sync concluído. ${inserted} scrobble(s) inserido(s).`);
+
+    if (inserted > 0) {
+      // invalida todas as keys públicas desse usuário
+      // próxima request reconstrói com dados frescos
+      await this.cache.invalidatePattern(`public:profile:${user.slug}`);
+      await this.cache.invalidatePattern(`public:overview:${user.slug}`);
+      await this.cache.invalidatePattern(`public:recent:${user.slug}`);
+      await this.cache.invalidatePattern(`public:hours:${user.slug}`);
+      this.logger.log(`Cache invalidado para ${user.slug}`);
+    }
+    
     this.logger.log(`Sync concluído. ${inserted} scrobble(s) inserido(s).`);
   }
 }

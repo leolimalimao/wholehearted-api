@@ -1,19 +1,26 @@
 import { Controller, Get, NotFoundException, Param, Query } from '@nestjs/common';
 import { AuthService } from '../auth/auth.service';
 import { StatsService, TimeRange } from '../stats/stats.service';
+import { CacheService } from '../common/cache/cache.service';
 
+function parseRange(range: string): TimeRange {
+  const valid: TimeRange[] = ['week', 'month', '3months', '6months', 'year', 'all'];
+  return valid.includes(range as TimeRange) ? (range as TimeRange) : 'month';
+}
 
-// rotas públicas — sem AuthGuard
-// usadas pelo Next.js no servidor pra gerar Open Graph
 @Controller('public')
 export class PublicController {
   constructor(
     private authService: AuthService,
     private statsService: StatsService,
-  ) { }
+    private cache: CacheService,
+  ) {}
 
   @Get('profile/:slug')
   async getPublicProfile(@Param('slug') slug: string) {
+    const cached = await this.cache.get('public:profile', slug);
+    if (cached) return cached;
+
     const user = await this.authService.findBySlug(slug);
     if (!user) throw new NotFoundException('Perfil não encontrado');
 
@@ -23,47 +30,53 @@ export class PublicController {
       this.statsService.getTopArtists(user.id, 'month', 5),
     ]);
 
-    return {
-      slug: user.slug,
-      displayName: user.displayName,
-      total,
-      topTracks,
-      topArtists,
-    };
+    const result = { slug: user.slug, displayName: user.displayName, total, topTracks, topArtists };
+
+    await this.cache.set(result, 600, 'public:profile', slug);
+    return result;
   }
 
   @Get('profile/:slug/overview')
-  async getPublicOverview(
-    @Param('slug') slug: string,
-    @Query('range') range = 'month',
-  ) {
+  async getPublicOverview(@Param('slug') slug: string, @Query('range') range = 'month') {
+    const r = parseRange(range);
+    const cached = await this.cache.get('public:overview', slug, r);
+    if (cached) return cached;
+
     const user = await this.authService.findBySlug(slug);
     if (!user) throw new NotFoundException('Perfil não encontrado');
-    return this.statsService.getOverview(user.id, parseRange(range));
+
+    const result = await this.statsService.getOverview(user.id, r);
+
+    await this.cache.set(result, 600, 'public:overview', slug, r);
+    return result;
   }
 
   @Get('profile/:slug/recent')
-  async getPublicRecent(
-    @Param('slug') slug: string,
-    @Query('limit') limit = '20',
-  ) {
+  async getPublicRecent(@Param('slug') slug: string, @Query('limit') limit = '20') {
+    const cached = await this.cache.get('public:recent', slug);
+    if (cached) return cached;
+
     const user = await this.authService.findBySlug(slug);
     if (!user) throw new NotFoundException('Perfil não encontrado');
-    return this.statsService.getRecentScrobbles(user.id, parseInt(limit));
+
+    const result = await this.statsService.getRecentScrobbles(user.id, parseInt(limit));
+
+    await this.cache.set(result, 600, 'public:recent', slug);
+    return result;
   }
 
   @Get('profile/:slug/hours')
-  async getPublicHours(
-    @Param('slug') slug: string,
-    @Query('range') range = 'month',
-  ) {
+  async getPublicHours(@Param('slug') slug: string, @Query('range') range = 'month') {
+    const r = parseRange(range);
+    const cached = await this.cache.get('public:hours', slug, r);
+    if (cached) return cached;
+
     const user = await this.authService.findBySlug(slug);
     if (!user) throw new NotFoundException('Perfil não encontrado');
-    return this.statsService.getActivityByHour(user.id, parseRange(range));
-  }
-}
 
-function parseRange(range: string): TimeRange {
-  const valid: TimeRange[] = ['week', 'month', '3months', '6months', 'year', 'all'];
-  return valid.includes(range as TimeRange) ? (range as TimeRange) : 'month';
+    const result = await this.statsService.getActivityByHour(user.id, r);
+
+    await this.cache.set(result, 600, 'public:hours', slug, r);
+    return result;
+  }
 }
