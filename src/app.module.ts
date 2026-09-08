@@ -12,6 +12,7 @@ import { RedisModule } from './common/redis/redis.module';
 import { PublicModule } from './public/public.module';
 import { CacheModule } from './common/cache/cache.module';
 import { AuthGuard } from './common/guards/auth.guard';
+import { LoggerModule } from './shared/logger/logger.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 
@@ -60,6 +61,7 @@ import { APP_GUARD } from '@nestjs/core';
     RedisModule,
     PublicModule,
     CacheModule,
+    LoggerModule,
   ],
   providers: [
     AuthGuard,

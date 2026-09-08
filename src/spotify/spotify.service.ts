@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -7,18 +7,20 @@ import { isAxiosError } from 'axios';
 import { User } from '../auth/entities/user.entity';
 import { AuthService } from '../auth/auth.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
+import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 
 const SPOTIFY_BASE = 'https://api.spotify.com/v1';
 
 @Injectable()
 export class SpotifyService {
-  private readonly logger = new Logger(SpotifyService.name);
 
   constructor(
     private http: HttpService,
     @InjectRepository(User) private userRepo: Repository<User>,
     private authService: AuthService,
     private encryption: EncryptionService,
+    @InjectPinoLogger(SpotifyService.name)
+    private readonly logger: PinoLogger,
   ) { }
 
   private async getUser(userId: string): Promise<User> {
@@ -42,7 +44,7 @@ export class SpotifyService {
     const bufferMs = 60 * 1000;
 
     if (expiresAt.getTime() - now.getTime() < bufferMs) {
-      this.logger.log(`Access token expirado — renovando para ...${userId.slice(-4)}`);
+      this.logger.info(`Access token expirado — renovando para ...${userId.slice(-4)}`);
       return this.authService.refreshAccessToken(user);
     }
 

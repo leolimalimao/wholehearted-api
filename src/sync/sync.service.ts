@@ -5,14 +5,16 @@ import { Repository } from 'typeorm';
 import { Queue } from 'bullmq';
 import { SYNC_QUEUE } from './sync.processor';
 import { User } from '../auth/entities/user.entity';
+import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 
 @Injectable()
 export class SyncService implements OnModuleInit {
-  private readonly logger = new Logger(SyncService.name);
 
   constructor(
     @InjectQueue(SYNC_QUEUE) private syncQueue: Queue,
     @InjectRepository(User) private userRepo: Repository<User>,
+    @InjectPinoLogger(SyncService.name)
+    private readonly logger: PinoLogger,
   ) { }
 
   async onModuleInit() {
@@ -24,7 +26,7 @@ export class SyncService implements OnModuleInit {
     const users = await this.userRepo.find();
   
     if (!users.length) {
-      this.logger.log('Nenhum usuário encontrado — aguardando primeiro login.');
+      this.logger.info('Nenhum usuário encontrado — aguardando primeiro login.');
       return;
     }
   
@@ -32,7 +34,7 @@ export class SyncService implements OnModuleInit {
       await this.registerSyncForUser(user.id);
     }
   
-    this.logger.log(`${users.length} job(s) de sync registrado(s).`);
+    this.logger.info(`${users.length} job(s) de sync registrado(s).`);
   }
   
   // parâmetro fireImmediate controla se dispara agora
@@ -52,6 +54,6 @@ export class SyncService implements OnModuleInit {
       },
     );
   
-    this.logger.log(`Job registrado para usuário ...${userId.slice(-4)}`);
+    this.logger.info(`Job registrado para usuário ...${userId.slice(-4)}`);
   }
 }
