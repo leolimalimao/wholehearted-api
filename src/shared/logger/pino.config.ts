@@ -5,10 +5,11 @@ const LOG_DIR = '/var/log/wholehearted-stats';
 const LOG_FILE = path.join(LOG_DIR, 'app.log');
 
 const isDev = process.env.NODE_ENV !== 'production';
+const logLevel = process.env.LOG_LEVEL || (isDev ? 'debug' : 'info');
 
 export const pinoConfig: Params = {
   pinoHttp: {
-    level: isDev ? 'debug' : 'error',
+    level: logLevel,
 
     // Gera requestId automático para cada request HTTP
     genReqId: (req) => {
@@ -48,13 +49,13 @@ export const pinoConfig: Params = {
             // Stdout JSON (Railway captura isso)
             {
               target: 'pino/file',
-              level: 'error',
+              level: logLevel,
               options: { destination: 1 }, // 1 = stdout
             },
             // Arquivo local
             {
               target: 'pino/file',
-              level: 'error',
+              level: logLevel,
               options: {
                 destination: LOG_FILE,
                 mkdir: true, // Cria o diretório se não existir
