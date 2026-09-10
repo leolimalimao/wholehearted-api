@@ -2,6 +2,8 @@ import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
 @Entity('scrobbles')
 @Index(['trackSpotifyId', 'playedAt', 'userId'], { unique: true })
+@Index(['userId', 'playedAt'])
+@Index(['userId', 'artistName'])
 export class Scrobble {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

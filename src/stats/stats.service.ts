@@ -60,7 +60,7 @@ export class StatsService {
   }
 
   async getTopArtists(userId: string, range: TimeRange = 'month', limit = 10) {
-    const qb = this.scrobbleRepo
+    const innerQb = this.scrobbleRepo
       .createQueryBuilder('s')
       .select('s.artistName', 'artistName')
       .addSelect('COUNT(*)', 'plays')
@@ -68,8 +68,29 @@ export class StatsService {
       .orderBy('plays', 'DESC')
       .limit(limit);
 
-    this.applyFilters(qb, userId, range);
-    return qb.getRawMany();
+    this.applyFilters(innerQb, userId, range, 's');
+
+    const outerQb = this.scrobbleRepo.manager
+      .createQueryBuilder()
+      .select('"ta"."artistName"', 'artistName')
+      .addSelect('"ta"."plays"', 'plays')
+      .addSelect(
+        (sub) =>
+          sub
+            .select('s2.albumImageUrl')
+            .from(Scrobble, 's2')
+            .where('s2.userId = :userId')
+            .andWhere('s2.artistName = "ta"."artistName"')
+            .andWhere('s2.albumImageUrl IS NOT NULL')
+            .orderBy('s2.playedAt', 'DESC')
+            .limit(1),
+        'imageUrl',
+      )
+      .from(`(${innerQb.getQuery()})`, 'ta')
+      .setParameters({ ...innerQb.getParameters(), userId })
+      .orderBy('"ta"."plays"', 'DESC');
+
+    return outerQb.getRawMany();
   }
 
   async getActivityByHour(userId: string, range: TimeRange = 'month') {
