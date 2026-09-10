@@ -1,6 +1,7 @@
 import { Controller, Get, Query, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
+import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 import { AuthService } from './auth.service';
 import { RedisService } from '../common/redis/redis.service';
 import { JwtAuthService } from '../common/jwt/jwt.service';
@@ -14,7 +15,9 @@ export class AuthController {
     private config: ConfigService,
     private redis: RedisService,
     private jwtAuth: JwtAuthService,
-    private syncService: SyncService, //injeta SyncService
+    private syncService: SyncService,
+    @InjectPinoLogger(AuthController.name)
+    private readonly logger: PinoLogger,
   ) { }
 
   @Get('login')
@@ -24,6 +27,7 @@ export class AuthController {
     const state = generateState();
 
     await this.redis.set(`oauth:${state}:verifier`, codeVerifier, 300);
+    this.logger.info({ state }, 'Fluxo de login OAuth iniciado. Redirecionando para Spotify.');
 
     const scopes = [
       'user-top-read',
@@ -52,42 +56,65 @@ export class AuthController {
     const code = query['code'];
     const state = query['state'];
     const error = query['error'];
+    const frontendUrl = this.config.get('FRONTEND_URL') ?? 'http://localhost:3000';
 
-    if (error) return res.status(400).json({ error });
-    if (!state) return res.status(403).json({ error: 'missing_state' });
+    if (error) {
+      this.logger.warn({ error }, 'Spotify retornou erro no callback de autorização.');
+      return res.redirect(`${frontendUrl}?auth_error=${encodeURIComponent(error)}`);
+    }
+
+    if (!state) {
+      this.logger.warn('Callback OAuth recebido sem parâmetro state.');
+      return res.status(403).json({ error: 'missing_state' });
+    }
 
     const codeVerifier = await this.redis.get(`oauth:${state}:verifier`);
-    if (!codeVerifier) return res.status(403).json({ error: 'state_mismatch' });
+    if (!codeVerifier) {
+      this.logger.warn({ state }, 'state_mismatch ou verifier expirado no Redis durante callback OAuth.');
+      return res.status(403).json({ error: 'state_mismatch' });
+    }
 
     await this.redis.del(`oauth:${state}:verifier`);
 
-    const tokens = await this.authService.exchangeCodeForTokens(code, codeVerifier);
-    const profile = await this.authService.fetchSpotifyProfile(tokens.access_token);
-    const user = await this.authService.upsertUser(profile, tokens);
+    try {
+      const tokens = await this.authService.exchangeCodeForTokens(code, codeVerifier);
+      const profile = await this.authService.fetchSpotifyProfile(tokens.access_token);
+      const user = await this.authService.upsertUser(profile, tokens);
 
-    // registra ou atualiza o job de sync do user
-    await this.syncService.registerSyncForUser(user.id);
+      // registra ou atualiza o job de sync do user
+      await this.syncService.registerSyncForUser(user.id);
 
-    // gera JWT com userId e spotifyId
-    const jwt = this.jwtAuth.sign({
-      userId: user.id,
-      spotifyId: profile.id,
-      slug: user.slug,
-    });
+      // gera JWT com userId e spotifyId
+      const jwt = this.jwtAuth.sign({
+        userId: user.id,
+        spotifyId: profile.id,
+        slug: user.slug,
+      });
 
-    const isProduction = this.config.get('NODE_ENV') === 'production';
+      const isProduction = this.config.get('NODE_ENV') === 'production';
 
-    // seta cookie httpOnly — nunca acessível via JavaScript no browser
-    res.cookie('session', jwt, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 dias em ms
-    });
+      // seta cookie httpOnly — nunca acessível via JavaScript no browser
+      res.cookie('session', jwt, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 dias em ms
+      });
 
-    // redireciona pro frontend em vez de retornar JSON
-    const frontendUrl = this.config.get('FRONTEND_URL') ?? 'http://localhost:3000';
-    res.redirect(frontendUrl);
+      this.logger.info(
+        { userId: user.id.slice(-4), slug: user.slug },
+        'Login OAuth finalizado com sucesso. Redirecionando para o frontend.',
+      );
+
+      // redireciona pro frontend em vez de retornar JSON
+      res.redirect(frontendUrl);
+    } catch (err: any) {
+      this.logger.error(
+        { err, message: err?.message },
+        'Erro inesperado durante processamento do callback OAuth.',
+      );
+      return res.redirect(`${frontendUrl}?auth_error=callback_failed`);
+    }
   }
 
   // endpoint pra o frontend verificar se há sessão ativa
@@ -101,7 +128,7 @@ export class AuthController {
       return {
         authenticated: true,
         spotifyId: payload.spotifyId,
-        slug: payload.slug, // adiciona slug
+        slug: payload.slug,
       };
     } catch {
       return { authenticated: false };
@@ -112,6 +139,7 @@ export class AuthController {
   @Get('logout')
   logout(@Res() res: Response) {
     const isProduction = process.env.NODE_ENV === 'production';
+    this.logger.info('Logout solicitado — removendo cookie de sessão.');
     res.clearCookie('session', {
       httpOnly: true,
       secure: isProduction,

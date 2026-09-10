@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -18,42 +18,57 @@ export class SyncService implements OnModuleInit {
   ) { }
 
   async onModuleInit() {
-    const schedulers = await this.syncQueue.getJobSchedulers();
-    for (const scheduler of schedulers) {
-      await this.syncQueue.removeJobScheduler(scheduler.key);
+    try {
+      const schedulers = await this.syncQueue.getJobSchedulers();
+      for (const scheduler of schedulers) {
+        await this.syncQueue.removeJobScheduler(scheduler.key);
+      }
+
+      const users = await this.userRepo.find();
+
+      if (!users.length) {
+        this.logger.info('Nenhum usuário encontrado — aguardando primeiro login.');
+        return;
+      }
+
+      for (const user of users) {
+        await this.registerSyncForUser(user.id);
+      }
+
+      this.logger.info(`${users.length} job(s) de sync registrado(s).`);
+    } catch (err: any) {
+      this.logger.error(
+        { err, message: err?.message },
+        'Falha ao inicializar agendamentos de sincronização no SyncService.',
+      );
     }
-  
-    const users = await this.userRepo.find();
-  
-    if (!users.length) {
-      this.logger.info('Nenhum usuário encontrado — aguardando primeiro login.');
-      return;
-    }
-  
-    for (const user of users) {
-      await this.registerSyncForUser(user.id);
-    }
-  
-    this.logger.info(`${users.length} job(s) de sync registrado(s).`);
   }
-  
+
   // parâmetro fireImmediate controla se dispara agora
   async registerSyncForUser(userId: string) {
-    await this.syncQueue.upsertJobScheduler(
-      `recently-played-sync:${userId}`,
-      { every: 10 * 60 * 1000 },
-      {
-        name: 'recently-played-sync',
-        data: { userId },
-        opts: {
-          removeOnComplete: 3,
-          removeOnFail: 2,
-          attempts: 2,
-          backoff: { type: 'exponential', delay: 30000 },
+    try {
+      await this.syncQueue.upsertJobScheduler(
+        `recently-played-sync:${userId}`,
+        { every: 10 * 60 * 1000 },
+        {
+          name: 'recently-played-sync',
+          data: { userId },
+          opts: {
+            removeOnComplete: 3,
+            removeOnFail: 2,
+            attempts: 2,
+            backoff: { type: 'exponential', delay: 30000 },
+          },
         },
-      },
-    );
-  
-    this.logger.info(`Job registrado para usuário ...${userId.slice(-4)}`);
+      );
+
+      this.logger.info(`Job registrado para usuário ...${userId.slice(-4)}`);
+    } catch (err: any) {
+      this.logger.error(
+        { err, userId: userId.slice(-4), message: err?.message },
+        `Falha ao registrar job de sync no BullMQ para usuário ...${userId.slice(-4)}`,
+      );
+      throw err;
+    }
   }
 }

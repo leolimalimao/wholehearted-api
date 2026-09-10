@@ -1,13 +1,19 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
+import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 
 @Injectable()
 export class EncryptionService {
   private readonly algorithm = 'aes-256-gcm';
   private readonly key: Buffer;
 
-  constructor(private config: ConfigService) {
+  constructor(
+    private config: ConfigService,
+    @Optional()
+    @InjectPinoLogger(EncryptionService.name)
+    private readonly logger?: PinoLogger,
+  ) {
     const hexKey = this.config.getOrThrow<string>('ENCRYPTION_KEY');
     this.key = Buffer.from(hexKey, 'hex'); // precisa ter 32 bytes (64 hex chars)
   }
@@ -22,14 +28,27 @@ export class EncryptionService {
   }
 
   decrypt(payload: string): string {
-    const [ivHex, authTagHex, encryptedHex] = payload.split(':');
-    const iv = Buffer.from(ivHex, 'hex');
-    const authTag = Buffer.from(authTagHex, 'hex');
-    const encrypted = Buffer.from(encryptedHex, 'hex');
+    try {
+      const parts = payload.split(':');
+      if (parts.length !== 3) {
+        throw new Error('Payload em formato inválido. Esperado iv:authTag:encrypted');
+      }
 
-    const decipher = crypto.createDecipheriv(this.algorithm, this.key, iv);
-    decipher.setAuthTag(authTag);
-    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-    return decrypted.toString('utf8');
+      const [ivHex, authTagHex, encryptedHex] = parts;
+      const iv = Buffer.from(ivHex, 'hex');
+      const authTag = Buffer.from(authTagHex, 'hex');
+      const encrypted = Buffer.from(encryptedHex, 'hex');
+
+      const decipher = crypto.createDecipheriv(this.algorithm, this.key, iv);
+      decipher.setAuthTag(authTag);
+      const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+      return decrypted.toString('utf8');
+    } catch (err: any) {
+      this.logger?.error(
+        { err, message: err?.message },
+        'Falha ao decriptar payload AES-256-GCM. Dados corrompidos ou chave ENCRYPTION_KEY divergente.',
+      );
+      throw err;
+    }
   }
 }
