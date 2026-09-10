@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -7,18 +7,20 @@ import { isAxiosError } from 'axios';
 import { User } from '../auth/entities/user.entity';
 import { AuthService } from '../auth/auth.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
+import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 
 const SPOTIFY_BASE = 'https://api.spotify.com/v1';
 
 @Injectable()
 export class SpotifyService {
-  private readonly logger = new Logger(SpotifyService.name);
 
   constructor(
     private http: HttpService,
     @InjectRepository(User) private userRepo: Repository<User>,
     private authService: AuthService,
     private encryption: EncryptionService,
+    @InjectPinoLogger(SpotifyService.name)
+    private readonly logger: PinoLogger,
   ) { }
 
   private async getUser(userId: string): Promise<User> {
@@ -27,6 +29,7 @@ export class SpotifyService {
     });
 
     if (!user) {
+      this.logger.warn({ userId: userId.slice(-4) }, `Usuário não encontrado no banco.`);
       throw new Error(`Usuário ${userId} não encontrado.`);
     }
 
@@ -42,11 +45,29 @@ export class SpotifyService {
     const bufferMs = 60 * 1000;
 
     if (expiresAt.getTime() - now.getTime() < bufferMs) {
-      this.logger.log(`Access token expirado — renovando para ...${userId.slice(-4)}`);
-      return this.authService.refreshAccessToken(user);
+      this.logger.info(`Access token expirado — renovando para ...${userId.slice(-4)}`);
+      try {
+        const token = await this.authService.refreshAccessToken(user);
+        this.logger.info(`Access token renovado com sucesso para ...${userId.slice(-4)}`);
+        return token;
+      } catch (refreshErr: any) {
+        this.logger.error(
+          { err: refreshErr, userId: userId.slice(-4), message: refreshErr?.message },
+          `Falha ao renovar access token para usuário ...${userId.slice(-4)}`,
+        );
+        throw refreshErr;
+      }
     }
 
-    return this.encryption.decrypt(user.encryptedAccessToken);
+    try {
+      return this.encryption.decrypt(user.encryptedAccessToken);
+    } catch (decryptErr: any) {
+      this.logger.error(
+        { err: decryptErr, userId: userId.slice(-4) },
+        `Falha ao decifrar access token para usuário ...${userId.slice(-4)}`,
+      );
+      throw decryptErr;
+    }
   }
 
   // Método central de request com tratamento de rate limit e refresh
@@ -56,6 +77,7 @@ export class SpotifyService {
     params?: Record<string, string>,
   ): Promise<T> {
     const token = await this.getValidAccessToken(userId);
+    const startTime = Date.now();
 
     const makeRequest = async (accessToken: string) =>
       firstValueFrom(
@@ -67,9 +89,20 @@ export class SpotifyService {
 
     try {
       const res = await makeRequest(token);
+      const durationMs = Date.now() - startTime;
+      this.logger.debug(
+        { endpoint, durationMs, userId: userId.slice(-4) },
+        `Spotify API GET ${endpoint} completado em ${durationMs}ms`,
+      );
       return res.data;
     } catch (err: unknown) {
+      const durationMs = Date.now() - startTime;
+
       if (!isAxiosError(err)) {
+        this.logger.error(
+          { err, endpoint, durationMs, userId: userId.slice(-4) },
+          `Erro inesperado na chamada ao Spotify em ${endpoint}`,
+        );
         throw err;
       }
 
@@ -81,11 +114,31 @@ export class SpotifyService {
           String(err.response?.headers['retry-after'] ?? '2'),
           10,
         );
-        this.logger.warn(`Rate limit atingido. Aguardando ${retryAfter}s...`);
+        this.logger.warn(
+          { endpoint, retryAfter, userId: userId.slice(-4) },
+          `Rate limit atingido no Spotify. Aguardando ${retryAfter}s...`,
+        );
         await new Promise((r) => setTimeout(r, retryAfter * 1000));
+        const retryStart = Date.now();
         const res = await makeRequest(token);
+        this.logger.info(
+          { endpoint, durationMs: Date.now() - retryStart, userId: userId.slice(-4) },
+          `Retry após 429 completado com sucesso em ${endpoint}`,
+        );
         return res.data;
       }
+
+      this.logger.error(
+        {
+          endpoint,
+          status,
+          durationMs,
+          userId: userId.slice(-4),
+          spotifyError: err.response?.data,
+          message: err.message,
+        },
+        `Erro HTTP [${status ?? 'SEM_STATUS'}] retornado pela Spotify Web API em ${endpoint}`,
+      );
 
       throw err;
     }

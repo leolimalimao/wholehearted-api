@@ -5,6 +5,7 @@ import { Scrobble } from '../scrobbles/entities/scrobble.entity';
 import { User } from '../auth/entities/user.entity';
 import { Test } from '@nestjs/testing';
 import { CacheService } from '../common/cache/cache.service';
+import { getLoggerToken } from 'nestjs-pino';
 
 // factory de item do recently-played pra não repetir em cada teste
 function makeSpotifyItem(overrides: Partial<{ id: string; name: string; playedAt: string }> = {}) {
@@ -61,6 +62,15 @@ describe('SyncProcessor', () => {
           provide: CacheService,
           useValue: {
             invalidatePattern: jest.fn(),
+          },
+        },
+        {
+          provide: getLoggerToken(SyncProcessor.name),
+          useValue: {
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+            debug: jest.fn(),
           },
         },
       ],
@@ -219,19 +229,37 @@ describe('SyncProcessor', () => {
       );
     });
 
-    it('não invalida o cache quando nenhum scrobble novo é inserido', async () => {
+    it('não quebra o sync se a invalidação de cache falhar', async () => {
       // Arrange
       userRepo.findOne.mockResolvedValue(mockUser);
-      scrobbleRepo.findOne.mockResolvedValue(null); // cursor
-      spotifyService.getRecentlyPlayed.mockResolvedValue({ items: [] });
+      scrobbleRepo.findOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+
+      spotifyService.getRecentlyPlayed.mockResolvedValue({
+        items: [makeSpotifyItem()],
+      });
+      cacheService.invalidatePattern.mockRejectedValue(new Error('Redis connection down'));
 
       const job = { data: { userId: mockUser.id } } as any;
 
-      // Act
-      await processor.process(job);
+      // Act & Assert — não deve lançar exceção
+      await expect(processor.process(job)).resolves.not.toThrow();
+      expect(scrobbleRepo.save).toHaveBeenCalled();
+    });
+  });
 
-      // Assert — sem dados novos, sem invalidação desnecessária
-      expect(cacheService.invalidatePattern).not.toHaveBeenCalled();
+  describe('tratamento de falhas na sincronização', () => {
+    it('relança o erro para o BullMQ gerenciar o retry se a Spotify API falhar', async () => {
+      // Arrange
+      userRepo.findOne.mockResolvedValue(mockUser);
+      scrobbleRepo.findOne.mockResolvedValue(null);
+      spotifyService.getRecentlyPlayed.mockRejectedValue(new Error('Spotify 503 Service Unavailable'));
+
+      const job = { data: { userId: mockUser.id } } as any;
+
+      // Act & Assert
+      await expect(processor.process(job)).rejects.toThrow('Spotify 503 Service Unavailable');
     });
   });
 });
