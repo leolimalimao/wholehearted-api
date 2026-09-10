@@ -116,14 +116,86 @@ export class StatsService {
     });
   }
 
+  async getUniqueCounts(userId: string, range: TimeRange = 'month') {
+    const qb = this.scrobbleRepo
+      .createQueryBuilder('s')
+      .select('COUNT(DISTINCT s.trackSpotifyId)', 'uniqueTracks')
+      .addSelect('COUNT(DISTINCT s.artistName)', 'uniqueArtists');
+    this.applyFilters(qb, userId, range);
+    const res = await qb.getRawOne();
+    return {
+      uniqueTracks: parseInt(res?.uniqueTracks ?? '0', 10),
+      uniqueArtists: parseInt(res?.uniqueArtists ?? '0', 10),
+    };
+  }
+
+  async getActiveStreak(userId: string): Promise<number> {
+    const qb = this.scrobbleRepo
+      .createQueryBuilder('s')
+      .select(`DISTINCT DATE(s.playedAt AT TIME ZONE 'America/Sao_Paulo')`, 'date')
+      .where('s.userId = :userId', { userId })
+      .orderBy('date', 'DESC')
+      .limit(365);
+
+    const rows = await qb.getRawMany<{ date: string | Date }>();
+    if (!rows.length) return 0;
+
+    const dates = rows.map((r) => {
+      const d = r.date instanceof Date ? r.date.toISOString().slice(0, 10) : String(r.date).slice(0, 10);
+      return d;
+    });
+
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const now = new Date();
+    const todayStr = formatter.format(now);
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const yesterdayStr = formatter.format(yesterday);
+
+    const firstDate = dates[0];
+    if (firstDate !== todayStr && firstDate !== yesterdayStr) {
+      return 0;
+    }
+
+    let streak = 0;
+    let expectedDate = new Date(firstDate + 'T12:00:00Z');
+
+    for (const dateStr of dates) {
+      const currentDate = new Date(dateStr + 'T12:00:00Z');
+      const diffDays = Math.round((expectedDate.getTime() - currentDate.getTime()) / (24 * 60 * 60 * 1000));
+      if (diffDays === 0) {
+        streak++;
+        expectedDate = new Date(expectedDate.getTime() - 24 * 60 * 60 * 1000);
+      } else {
+        break;
+      }
+    }
+
+    return streak;
+  }
+
   // overview agrega tudo numa chamada — usado pelo dashboard principal
   async getOverview(userId: string, range: TimeRange = 'month') {
-    const [total, topTracks, topArtists, perDay] = await Promise.all([
+    const [total, uniqueCounts, streak, topTracks, topArtists, perDay] = await Promise.all([
       this.getTotalScrobbles(userId, range),
+      this.getUniqueCounts(userId, range),
+      this.getActiveStreak(userId),
       this.getTopTracks(userId, range, 10),
       this.getTopArtists(userId, range, 10),
       this.getScrobblesPerDay(userId, range),
     ]);
-    return { total, topTracks, topArtists, perDay };
+    return {
+      total,
+      uniqueTracks: uniqueCounts.uniqueTracks,
+      uniqueArtists: uniqueCounts.uniqueArtists,
+      streak,
+      topTracks,
+      topArtists,
+      perDay,
+    };
   }
 }

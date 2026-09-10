@@ -79,4 +79,19 @@ export class PublicController {
     await this.cache.set(result, 600, 'public:hours', slug, r);
     return result;
   }
+
+  @Get('profile/:slug/timeline')
+  async getPublicTimeline(@Param('slug') slug: string, @Query('range') range = 'year') {
+    const r = parseRange(range);
+    const cached = await this.cache.get('public:timeline', slug, r);
+    if (cached) return cached;
+
+    const user = await this.authService.findBySlug(slug);
+    if (!user) throw new NotFoundException('Perfil não encontrado');
+
+    const result = await this.statsService.getScrobblesPerDay(user.id, r);
+
+    await this.cache.set(result, 600, 'public:timeline', slug, r);
+    return result;
+  }
 }

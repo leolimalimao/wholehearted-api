@@ -110,6 +110,7 @@ export class SyncProcessor extends WorkerHost {
           await this.cache.invalidatePattern(`public:overview:${user.slug}`);
           await this.cache.invalidatePattern(`public:recent:${user.slug}`);
           await this.cache.invalidatePattern(`public:hours:${user.slug}`);
+          await this.cache.invalidatePattern(`public:timeline:${user.slug}`);
           this.logger.debug({ slug: user.slug }, `Cache invalidado para ${user.slug}`);
         } catch (cacheErr: any) {
           this.logger.warn(
