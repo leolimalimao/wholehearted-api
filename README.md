@@ -94,7 +94,14 @@ Endpoints de agregação protegidos por `AuthGuard`. `userId` extraído do JWT �
 Rotas sem autenticação para perfis públicos por slug. Usadas pelo Next.js no servidor para gerar Open Graph e pelo ProfileDashboard client-side.
 
 ### LoggerModule
-Structured logging com Pino. Dual transport: pretty-print em dev, JSON em produção. Correlação de requests via `AsyncLocalStorage` com `requestId` único por HTTP request. Injeção via `@InjectPinoLogger()`.
+Structured logging com Pino (`nestjs-pino`). Dual transport: pretty-print colorido em dev e JSON estruturado em produção (capturado diretamente pelo stdout da Railway e replicado em arquivo local). Suporta configuração dinâmica de nível via `LOG_LEVEL` (padrão: `debug` em dev e `info` em prod).
+
+Principais integrações monitoradas:
+- **Spotify Web API**: Medição de latência (`durationMs`), auto-refresh de tokens em repouso, logs de retry em caso de Rate Limit (429) e captura de erros HTTP com detalhes da resposta do Spotify.
+- **Sync Processor (BullMQ)**: Métricas completas de cada ciclo de sincronização (faixas novas vs. inseridas, `jobId`, usuário mascarado e tempo de execução), além de tolerância a falhas na invalidação de cache.
+- **OAuth & Auth**: Registro de novos usuários vs. atualização de sessões, detecção de divergência de `state` (anti-CSRF) ou expiração do `code_verifier` no Redis.
+- **Cache & Redis**: Listeners de ciclo de vida (`connect`, `error`, `reconnecting`), observabilidade de `Cache HIT` e `Cache MISS` (em nível `debug`) e fallback suave (*graceful degradation*) caso o Redis oscile.
+- **Criptografia AES-256-GCM**: Alertas estruturados em caso de falha de decifração por dados corrompidos ou rotação de chaves.
 
 ---
 
@@ -114,6 +121,16 @@ Queries de agregação (top tracks, top artists, activity by hour) com joins em 
 
 ### Preparação para multi-tenant sem reescrever
 Todo método do `StatsService` recebe `userId` como primeiro parâmetro desde o início. O `AuthGuard` extrai o `userId` do JWT — sem query ao banco por request. Quando um novo usuário faz login, um job BullMQ é registrado especificamente para ele. A mudança para multi-tenant completo foi cirúrgica: dois arquivos alterados, nenhuma regra de negócio reescrita.
+
+### Otimização do BullMQ para o modelo Serverless do Upstash
+O Upstash Redis cobra por comando (com teto de 500.000 comandos/mês no plano gratuito). Como o BullMQ padrão foi desenhado para instâncias dedicadas e consulta filas ociosas a cada 5 segundos (gerando mais de 518.000 requisições/mês mesmo sem tráfego), foram aplicadas as seguintes otimizações no processador:
+- `drainDelay: 30`: o worker aguarda 30 segundos com a fila vazia antes de consultar o Redis novamente (redução de 6x no polling ocioso).
+- `stalledInterval: 600000`: verificação de jobs travados espaçada para cada 10 minutos.
+- `lockDuration: 60000`: renovação de lock a cada 30 segundos durante o processamento de um sync.
+Isso mantém o consumo total em ~200k a 240k comandos/mês, operando confortavelmente abaixo da cota do plano Free.
+
+### Falha Suave de Cache (Graceful Degradation)
+O cache no Redis nunca atua como ponto único de falha (*Single Point of Failure*). As rotas públicas e o worker de sincronização tratam operações de leitura, gravação e invalidação em `try/catch`. Caso o Redis oscile ou atinja limites de requisição temporários, a aplicação emite um log estruturado em `warn` e busca as métricas diretamente no PostgreSQL, garantindo que o usuário final nunca receba erro 500 por instabilidade no cache.
 
 ---
 
@@ -243,6 +260,7 @@ http://127.0.0.1:3001/api/auth/login
 | DATABASE_URL | Connection string PostgreSQL |
 | REDIS_URL | Connection string Redis |
 | FRONTEND_URL | URL do frontend (CORS) |
+| LOG_LEVEL | Nível mínimo do Pino (`debug`, `info`, `warn`, `error` — padrão `info` em prod) |
 | NODE_ENV | production |
 | PORT | Porta do servidor |
 
