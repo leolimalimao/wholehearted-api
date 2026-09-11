@@ -86,7 +86,10 @@ export class AuthService {
     let suffix = 2;
 
     while (true) {
-      const existing = await this.userRepo.findOne({ where: { slug } });
+      const existing = await this.userRepo.findOne({
+        where: { slug },
+        select: { id: true, slug: true },
+      });
 
       // não existe → slug disponível
       if (!existing) return slug;
@@ -191,6 +194,13 @@ export class AuthService {
   }
 
   async findBySlug(slug: string): Promise<User | null> {
-    return this.userRepo.findOne({ where: { slug } });
+    return this.userRepo.findOne({
+      where: { slug },
+      select: {
+        id: true,
+        slug: true,
+        displayName: true,
+      },
+    });
   }
 }

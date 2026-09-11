@@ -15,10 +15,10 @@ export class User {
   @Index()
   slug!: string; // novo campo — único e indexado pra busca rápida por URL
 
-  @Column({ type: 'text' })
+  @Column({ type: 'text', select: false })
   encryptedRefreshToken!: string;
 
-  @Column({ type: 'text', nullable: true })
+  @Column({ type: 'text', nullable: true, select: false })
   encryptedAccessToken!: string;
 
   @Column({ type: 'timestamptz', nullable: true })

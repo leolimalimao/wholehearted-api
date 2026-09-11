@@ -24,7 +24,9 @@ export class SyncService implements OnModuleInit {
         await this.syncQueue.removeJobScheduler(scheduler.key);
       }
 
-      const users = await this.userRepo.find();
+      const users = await this.userRepo.find({
+        select: { id: true },
+      });
 
       if (!users.length) {
         this.logger.info('Nenhum usuário encontrado — aguardando primeiro login.');

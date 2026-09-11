@@ -26,6 +26,13 @@ export class SpotifyService {
   private async getUser(userId: string): Promise<User> {
     const user = await this.userRepo.findOne({
       where: { id: userId },
+      select: {
+        id: true,
+        slug: true,
+        accessTokenExpiresAt: true,
+        encryptedAccessToken: true,
+        encryptedRefreshToken: true,
+      },
     });
 
     if (!user) {
