@@ -51,7 +51,7 @@ export class SyncService implements OnModuleInit {
     try {
       await this.syncQueue.upsertJobScheduler(
         `recently-played-sync:${userId}`,
-        { every: 10 * 60 * 1000 },
+        { every: 3 * 60 * 1000 },
         {
           name: 'recently-played-sync',
           data: { userId },

@@ -125,7 +125,7 @@ describe('SyncService', () => {
       // Assert
       expect(syncQueue.upsertJobScheduler).toHaveBeenCalledWith(
         'recently-played-sync:user-uuid-123',
-        { every: 600000 },
+        { every: 180000 },
         expect.objectContaining({
           name: 'recently-played-sync',
           data: { userId: 'user-uuid-123' },

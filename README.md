@@ -47,10 +47,10 @@ O sistema suporta múltiplos usuários — cada um autentica com sua própria co
 
 1. Login OAuth completa
 2. Job BullMQ registrado para esse `userId`
-3. A cada 5min: `GET /me/player/recently-played`
+3. A cada 3min: `GET /me/player/recently-played`
 4. Compara com cursor (último scrobble salvo)
 5. Persiste apenas músicas novas com `userId`
-6. Dorme 5 minutos → repete indefinidamente
+6. Dorme 3 minutos → repete indefinidamente
 
 ### Isolamento de dados
 
