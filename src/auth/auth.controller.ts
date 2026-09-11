@@ -60,7 +60,7 @@ export class AuthController {
 
     if (error) {
       this.logger.warn({ error }, 'Spotify retornou erro no callback de autorização.');
-      return res.redirect(`${frontendUrl}?auth_error=${encodeURIComponent(error)}`);
+      return res.redirect(`${frontendUrl}/auth/restricted?error=${encodeURIComponent(error)}`);
     }
 
     if (!state) {
@@ -113,7 +113,7 @@ export class AuthController {
         { err, message: err?.message },
         'Erro inesperado durante processamento do callback OAuth.',
       );
-      return res.redirect(`${frontendUrl}?auth_error=callback_failed`);
+      return res.redirect(`${frontendUrl}/auth/restricted?error=callback_failed`);
     }
   }
 

@@ -79,7 +79,7 @@ O sistema suporta múltiplos usuários — cada um autentica com sua própria co
 ## Módulos
 
 ### AuthModule
-OAuth Authorization Code + PKCE completo. O state anti-CSRF e o codeVerifier do PKCE são armazenados temporariamente no Redis (TTL 5min) em vez de cookies — solução para o problema de SameSite em contexto cross-origin em produção. Após o callback, gera JWT com `userId` e `slug` e seta cookie httpOnly.
+OAuth Authorization Code + PKCE completo. O state anti-CSRF e o codeVerifier do PKCE são armazenados temporariamente no Redis (TTL 5min) em vez de cookies — solução para o problema de SameSite em contexto cross-origin em produção. Após o callback, gera JWT com `userId` e `slug` e seta cookie httpOnly. Em caso de recusa de permissão (`access_denied`) ou falhas no handshake, redireciona para a rota `/auth/restricted` do frontend.
 
 ### SpotifyModule
 Client wrapper — único ponto de contato com a Spotify API. Gerencia refresh automático do access_token com buffer de 60 segundos antes da expiração, retry automático respeitando o header `Retry-After` em caso de rate limit 429, e descriptografia de tokens em memória (nunca persistidos em texto puro).
