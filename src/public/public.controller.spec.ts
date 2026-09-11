@@ -16,6 +16,7 @@ const mockAuthService = () => ({
 
 const mockStatsService = () => ({
   getScrobblesPerDay: jest.fn(),
+  getRecentScrobbles: jest.fn(),
 });
 
 describe('PublicController - getPublicTimeline', () => {
@@ -76,5 +77,41 @@ describe('PublicController - getPublicTimeline', () => {
 
     await expect(controller.getPublicTimeline(slug, 'year')).rejects.toBeInstanceOf(NotFoundException);
     expect(cacheService.set).not.toHaveBeenCalled();
+  });
+
+  describe('getPublicRecent', () => {
+    it('retorna do cache se presente', async () => {
+      const cached = [{ id: 'scrobble-1', trackName: 'Track' }];
+      cacheService.get.mockResolvedValueOnce(cached);
+
+      const result = await controller.getPublicRecent(slug, '20');
+
+      expect(result).toBe(cached);
+      expect(cacheService.get).toHaveBeenCalledWith('public:recent', slug);
+      expect(authService.findBySlug).not.toHaveBeenCalled();
+    });
+
+    it('busca no StatsService, armazena no cache e retorna se não estiver no cache', async () => {
+      const recentData = [{ id: 'scrobble-1', trackName: 'Track' }];
+      cacheService.get.mockResolvedValueOnce(null);
+      authService.findBySlug.mockResolvedValueOnce(user);
+      statsService.getRecentScrobbles.mockResolvedValueOnce(recentData);
+
+      const result = await controller.getPublicRecent(slug, '20');
+
+      expect(cacheService.get).toHaveBeenCalledWith('public:recent', slug);
+      expect(authService.findBySlug).toHaveBeenCalledWith(slug);
+      expect(statsService.getRecentScrobbles).toHaveBeenCalledWith(user.id, 20);
+      expect(cacheService.set).toHaveBeenCalledWith(recentData, 600, 'public:recent', slug);
+      expect(result).toBe(recentData);
+    });
+
+    it('lança NotFoundException se usuário não existir', async () => {
+      cacheService.get.mockResolvedValueOnce(null);
+      authService.findBySlug.mockResolvedValueOnce(null);
+
+      await expect(controller.getPublicRecent(slug, '20')).rejects.toBeInstanceOf(NotFoundException);
+      expect(cacheService.set).not.toHaveBeenCalled();
+    });
   });
 });

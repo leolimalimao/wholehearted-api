@@ -132,6 +132,15 @@ export class StatsService {
   async getRecentScrobbles(userId: string, limit = 20) {
     return this.scrobbleRepo.find({
       where: { userId },
+      select: {
+        id: true,
+        trackSpotifyId: true,
+        trackName: true,
+        artistName: true,
+        albumName: true,
+        albumImageUrl: true,
+        playedAt: true,
+      },
       order: { playedAt: 'DESC' },
       take: limit,
     });
