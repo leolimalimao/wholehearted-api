@@ -11,11 +11,11 @@ import { User } from '../auth/entities/user.entity';
 export const SYNC_QUEUE = 'sync';
 
 @Processor(SYNC_QUEUE, {
-  stalledInterval: 600000,  // verificação de jobs travados a cada 10 minutos (em ms)
+  stalledInterval: 30000,   // verificação de jobs travados a cada 30 segundos (detecção ágil em caso de crash)
   maxStalledCount: 1,
   concurrency: 1,
-  drainDelay: 30,           // espera 30 segundos quando a fila estiver vazia (reduz polling ocioso em 6x)
-  lockDuration: 60000,      // lock de 60s por job (renovação menos frequente durante execução)
+  drainDelay: 5,            // 5 segundos padrão quando a fila estiver drenada
+  lockDuration: 30000,      // lock de 30s por job
 })
 export class SyncProcessor extends WorkerHost {
   constructor(

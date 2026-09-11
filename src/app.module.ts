@@ -37,6 +37,7 @@ import { APP_GUARD } from '@nestjs/core';
           connection: {
             host: url.hostname,
             port: parseInt(url.port),
+            username: url.username || undefined,
             password: url.password,
             tls: redisUrl.startsWith('rediss://') ? {} : undefined,
             enableOfflineQueue: false,

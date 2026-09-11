@@ -31,7 +31,7 @@ O sistema suporta múltiplos usuários — cada um autentica com sua própria co
 │         │                  │                        │
 │         ▼                  ▼                        │
 │  ┌─────────────────────────────────┐               │
-│  │         Upstash (Redis)          │               │
+│  │     Railway Redis (Dedicado)    │               │
 │  └─────────────────────────────────┘               │
 │                                                     │
 │  ┌─────────────────────────────────┐               │
@@ -67,7 +67,7 @@ O sistema suporta múltiplos usuários — cada um autentica com sua própria co
 |--------|-----------|---------|
 | Framework | NestJS + TypeScript | Modularização, DI nativa, decorators |
 | Banco de dados | PostgreSQL (Neon) | ACID, queries complexas de agregação |
-| Filas | BullMQ + Redis (Upstash) | Jobs persistentes, retry automático, por usuário |
+| Filas | BullMQ + Redis (Railway) | Jobs persistentes, retry automático, rede privada sem limite de comandos |
 | Auth | OAuth 2.0 + PKCE + JWT | Sem client_secret exposto, sessão stateless |
 | Criptografia | AES-256-GCM | Tokens em repouso nunca em texto puro |
 | Deploy | Railway | Processo contínuo — BullMQ não funciona em serverless |
@@ -122,12 +122,13 @@ Queries de agregação (top tracks, top artists, activity by hour) com joins em 
 ### Preparação para multi-tenant sem reescrever
 Todo método do `StatsService` recebe `userId` como primeiro parâmetro desde o início. O `AuthGuard` extrai o `userId` do JWT — sem query ao banco por request. Quando um novo usuário faz login, um job BullMQ é registrado especificamente para ele. A mudança para multi-tenant completo foi cirúrgica: dois arquivos alterados, nenhuma regra de negócio reescrita.
 
-### Otimização do BullMQ para o modelo Serverless do Upstash
-O Upstash Redis cobra por comando (com teto de 500.000 comandos/mês no plano gratuito). Como o BullMQ padrão foi desenhado para instâncias dedicadas e consulta filas ociosas a cada 5 segundos (gerando mais de 518.000 requisições/mês mesmo sem tráfego), foram aplicadas as seguintes otimizações no processador:
-- `drainDelay: 30`: o worker aguarda 30 segundos com a fila vazia antes de consultar o Redis novamente (redução de 6x no polling ocioso).
-- `stalledInterval: 600000`: verificação de jobs travados espaçada para cada 10 minutos.
-- `lockDuration: 60000`: renovação de lock a cada 30 segundos durante o processamento de um sync.
-Isso mantém o consumo total em ~200k a 240k comandos/mês, operando confortavelmente abaixo da cota do plano Free.
+### Decisão de Infraestrutura: Migração do Upstash para Redis Dedicado (Railway)
+Inicialmente, o projeto utilizou o Upstash Redis (Serverless). No entanto, o BullMQ opera via polling de marcadores (`BZPOPMIN`), agendamento de jobs futuros e execução contínua de scripts Lua compilados (`moveToActive.lua`). No modelo do Upstash:
+1. Cada subcomando invocado dentro de scripts Lua (`ZRANGEBYSCORE`, `HMGET`, `RPOPLPUSH`, etc.) é bilhetado individualmente.
+2. A presença de jobs agendados recorrentes ativa a trava interna `maximumBlockTimeout = 10` do BullMQ, gerando uma taxa contínua de ~1,2 a 1,5 comandos/segundo (~109.000 comandos/dia mesmo com o backend ocioso), o que esgotaria a cota mensal gratuita de 500k comandos em 4 a 5 dias.
+3. Tentativas de amenizar o tráfego aumentando `stalledInterval` para 10 minutos fragilizavam a resiliência operacional em caso de falhas de workers.
+
+**Decisão:** Migração para uma instância dedicada de Redis hospedada no próprio Railway, dentro da mesma rede privada (`redis.railway.internal`). Como o faturamento no Railway é baseado em recursos (RAM/CPU) e não em contagem de requisições, o BullMQ pôde ser restaurado aos seus parâmetros ideais de engenharia (`stalledInterval: 30000`, `drainDelay: 5`), com latência de rede próxima de zero e sem risco de exaustão de cota.
 
 ### Falha Suave de Cache (Graceful Degradation)
 O cache no Redis nunca atua como ponto único de falha (*Single Point of Failure*). As rotas públicas e o worker de sincronização tratam operações de leitura, gravação e invalidação em `try/catch`. Caso o Redis oscile ou atinja limites de requisição temporários, a aplicação emite um log estruturado em `warn` e busca as métricas diretamente no PostgreSQL, garantindo que o usuário final nunca receba erro 500 por instabilidade no cache.
