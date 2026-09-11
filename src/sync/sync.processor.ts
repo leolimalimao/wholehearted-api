@@ -1,7 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 import { SpotifyService } from '../spotify/spotify.service';
 import { CacheService } from '../common/cache/cache.service';
@@ -42,8 +42,11 @@ export class SyncProcessor extends WorkerHost {
     const maskedUser = `...${userId.slice(-4)}`;
 
     try {
-      // busca o usuário pra ter o refresh_token disponível pro SpotifyService
-      const user = await this.userRepo.findOne({ where: { id: userId } });
+      // busca o usuário para ter o slug disponível para invalidação de cache
+      const user = await this.userRepo.findOne({
+        where: { id: userId },
+        select: { id: true, slug: true },
+      });
       if (!user) {
         this.logger.warn({ jobId, userId: maskedUser }, `Usuário ${maskedUser} não encontrado — ignorando.`);
         return;
@@ -53,6 +56,7 @@ export class SyncProcessor extends WorkerHost {
 
       const latest = await this.scrobbleRepo.findOne({
         where: { userId },
+        select: { playedAt: true },
         order: { playedAt: 'DESC' },
       });
 
@@ -76,16 +80,32 @@ export class SyncProcessor extends WorkerHost {
         return;
       }
 
+      // Deduplicação em lote: busca todas as faixas já salvas para os timestamps recebidos em uma única query
+      const playedAts = data.items.map((item) => new Date(item.played_at));
+      const existingScrobbles = await this.scrobbleRepo.find({
+        where: {
+          userId,
+          playedAt: In(playedAts),
+        },
+        select: {
+          trackSpotifyId: true,
+          playedAt: true,
+        },
+      });
+
+      const existingSet = new Set(
+        existingScrobbles.map(
+          (s) => `${s.trackSpotifyId}:${new Date(s.playedAt).getTime()}`,
+        ),
+      );
+
       let inserted = 0;
 
       for (const item of data.items) {
         const playedAt = new Date(item.played_at);
+        const dedupKey = `${item.track.id}:${playedAt.getTime()}`;
 
-        const exists = await this.scrobbleRepo.findOne({
-          where: { userId, trackSpotifyId: item.track.id, playedAt },
-        });
-
-        if (exists) continue;
+        if (existingSet.has(dedupKey)) continue;
 
         await this.scrobbleRepo.save(
           this.scrobbleRepo.create({
@@ -99,6 +119,7 @@ export class SyncProcessor extends WorkerHost {
           }),
         );
 
+        existingSet.add(dedupKey);
         inserted++;
       }
 

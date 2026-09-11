@@ -50,6 +50,7 @@ describe('SyncProcessor', () => {
           provide: getRepositoryToken(Scrobble),
           useValue: {
             findOne: jest.fn(),
+            find: jest.fn(),
             save: jest.fn(),
             create: jest.fn((dto) => dto),
           },
@@ -79,6 +80,7 @@ describe('SyncProcessor', () => {
     processor = module.get(SyncProcessor);
     spotifyService = module.get(SpotifyService) as jest.Mocked<SpotifyService>;
     scrobbleRepo = module.get(getRepositoryToken(Scrobble));
+    scrobbleRepo.find.mockResolvedValue([]);
     userRepo = module.get(getRepositoryToken(User));
     cacheService = module.get(CacheService) as jest.Mocked<CacheService>;
   });
@@ -117,9 +119,10 @@ describe('SyncProcessor', () => {
     it('não insere scrobble que já existe no banco', async () => {
       // Arrange
       userRepo.findOne.mockResolvedValue(mockUser);
-      scrobbleRepo.findOne
-        .mockResolvedValueOnce(null) // cursor: sem scrobble anterior
-        .mockResolvedValueOnce({ id: 'existing' }); // dedup: já existe
+      scrobbleRepo.findOne.mockResolvedValue(null); // cursor: sem scrobble anterior
+      scrobbleRepo.find.mockResolvedValueOnce([
+        { trackSpotifyId: 'track-123', playedAt: new Date('2026-09-05T20:00:00.000Z') },
+      ]); // dedup em lote: já existe
 
       spotifyService.getRecentlyPlayed.mockResolvedValue({
         items: [makeSpotifyItem()],
@@ -137,13 +140,10 @@ describe('SyncProcessor', () => {
     it('insere apenas músicas novas quando há mistura de novas e duplicadas', async () => {
       // Arrange
       userRepo.findOne.mockResolvedValue(mockUser);
-
-      // cursor: sem scrobble anterior
-      // dedup: primeira existe, segunda não existe
-      scrobbleRepo.findOne
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({ id: 'existing' }) // track-123 já existe
-        .mockResolvedValueOnce(null);               // track-456 é nova
+      scrobbleRepo.findOne.mockResolvedValue(null); // cursor: sem scrobble anterior
+      scrobbleRepo.find.mockResolvedValueOnce([
+        { trackSpotifyId: 'track-123', playedAt: new Date('2026-09-05T20:00:00.000Z') },
+      ]); // track-123 já existe, track-456 é nova
 
       spotifyService.getRecentlyPlayed.mockResolvedValue({
         items: [
@@ -179,6 +179,9 @@ describe('SyncProcessor', () => {
       await processor.process(job);
 
       // Assert — API chamada com userId, limit e timestamp corretos
+      expect(scrobbleRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ select: { playedAt: true } }),
+      );
       expect(spotifyService.getRecentlyPlayed).toHaveBeenCalledWith(
         mockUser.id,
         50,
@@ -210,9 +213,8 @@ describe('SyncProcessor', () => {
     it('invalida o cache do usuário quando novos scrobbles são inseridos', async () => {
       // Arrange
       userRepo.findOne.mockResolvedValue(mockUser);
-      scrobbleRepo.findOne
-        .mockResolvedValueOnce(null)  // cursor
-        .mockResolvedValueOnce(null); // dedup: não existe
+      scrobbleRepo.findOne.mockResolvedValue(null); // cursor
+      scrobbleRepo.find.mockResolvedValue([]);      // dedup: não existe
 
       spotifyService.getRecentlyPlayed.mockResolvedValue({
         items: [makeSpotifyItem()],
@@ -232,9 +234,8 @@ describe('SyncProcessor', () => {
     it('não quebra o sync se a invalidação de cache falhar', async () => {
       // Arrange
       userRepo.findOne.mockResolvedValue(mockUser);
-      scrobbleRepo.findOne
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(null);
+      scrobbleRepo.findOne.mockResolvedValue(null);
+      scrobbleRepo.find.mockResolvedValue([]);
 
       spotifyService.getRecentlyPlayed.mockResolvedValue({
         items: [makeSpotifyItem()],

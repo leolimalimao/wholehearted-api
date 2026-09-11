@@ -132,6 +132,15 @@ Isso mantém o consumo total em ~200k a 240k comandos/mês, operando confortavel
 ### Falha Suave de Cache (Graceful Degradation)
 O cache no Redis nunca atua como ponto único de falha (*Single Point of Failure*). As rotas públicas e o worker de sincronização tratam operações de leitura, gravação e invalidação em `try/catch`. Caso o Redis oscile ou atinja limites de requisição temporários, a aplicação emite um log estruturado em `warn` e busca as métricas diretamente no PostgreSQL, garantindo que o usuário final nunca receba erro 500 por instabilidade no cache.
 
+### Projeção Restrita e Segurança por Padrão (Secure by Default) no TypeORM
+O comportamento padrão de ORMs (trazer todas as colunas da entidade via `SELECT *`) pode gerar vazamento acidental de credenciais criptografadas em endpoints públicos (ex: `findBySlug`), além de expor dados relacionais internos multi-tenant (`user_id` em listagens de scrobbles). Para mitigar isso:
+- A entidade `User` marca tokens com `@Column({ select: false })`, exigindo projeção explícita apenas no pipeline de refresh e autenticação (`SpotifyService.getUser`).
+- O boot da aplicação (`SyncService.onModuleInit`) projeta estritamente `{ id: true }`, evitando carregar dados volumosos para o heap de memória da aplicação.
+- Listagens de faixas recentes projetam estritamente as propriedades visuais da faixa e a chave necessária para o React (`id`), descartando o `userId`.
+
+### Deduplicação de Scrobbles em Lote (Batch Dedup)
+O endpoint do Spotify retorna até 50 faixas recentes por consulta. Em vez de emitir até 50 queries sequenciais individuais ao PostgreSQL para verificar existência (`findOne`/`existsBy`), o worker extrai os timestamps recebidos e realiza uma única busca em lote via `In(playedAts)`. O matching é resolvido em memória em tempo $O(1)$ através de um `Set`, reduzindo o tráfego de rede entre a aplicação e o banco e acelerando a execução dos jobs do BullMQ.
+
 ---
 
 ## Testes
@@ -141,7 +150,10 @@ O projeto inclui testes unitários (Jest) com cobertura dos componentes crítico
 - `src/common/utils/slug.util.spec.ts` — Geração e validação de slugs
 - `src/common/encryption/encryption.service.spec.ts` — Criptografia AES-256-GCM
 - `src/app.controller.spec.ts` — Controller principal
-- `src/sync/sync.processor.spec.ts` — Processador de sync BullMQ
+- `src/sync/sync.processor.spec.ts` — Processador de sync BullMQ com batch dedup
+- `src/sync/sync.service.spec.ts` — Inicialização de agendamentos e projeção restrita de usuários
+- `src/stats/stats.service.spec.ts` — Projeção sanitizada de scrobbles recentes
+- `src/public/public.controller.spec.ts` — Rotas públicas com cache e tratamento de perfis
 
 Os testes utilizam mocks tipados e cobrem caminhos felizes e edge cases. Execute com `npm run test` (local) ou `npm run test:cov` para cobertura detalhada.
 
