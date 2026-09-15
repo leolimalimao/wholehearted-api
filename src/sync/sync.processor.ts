@@ -42,14 +42,34 @@ export class SyncProcessor extends WorkerHost {
     const maskedUser = `...${userId.slice(-4)}`;
 
     try {
-      // busca o usuário para ter o slug disponível para invalidação de cache
+      // busca o usuário para ter o slug disponível para invalidação de cache e verificar avatar
       const user = await this.userRepo.findOne({
         where: { id: userId },
-        select: { id: true, slug: true },
+        select: { id: true, slug: true, avatarUrl: true },
       });
       if (!user) {
         this.logger.warn({ jobId, userId: maskedUser }, `Usuário ${maskedUser} não encontrado — ignorando.`);
         return;
+      }
+
+      // Lazy backfill: resgata foto do perfil do Spotify caso o usuário ainda não possua avatarUrl registrado
+      if (user.avatarUrl === null || user.avatarUrl === undefined) {
+        try {
+          const profile = await this.spotifyService.getUserProfile(userId);
+          const avatarUrl = profile?.images?.[0]?.url ?? null;
+          await this.userRepo.update(userId, { avatarUrl });
+          user.avatarUrl = avatarUrl;
+          await this.cache.invalidatePattern(`public:profile:${user.slug}`);
+          this.logger.info(
+            { userId: maskedUser, hasAvatar: !!avatarUrl },
+            `Lazy backfill: avatar sincronizado para usuário ${maskedUser}`,
+          );
+        } catch (profileErr: any) {
+          this.logger.warn(
+            { err: profileErr, userId: maskedUser },
+            `Falha não-bloqueante no lazy backfill de avatar para ${maskedUser}`,
+          );
+        }
       }
 
       this.logger.info({ jobId, userId: maskedUser }, `Iniciando sync para usuário ${maskedUser}`);

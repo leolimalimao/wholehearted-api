@@ -172,6 +172,16 @@ export class SpotifyService {
   getTopArtists(userId: string, timeRange: 'short_term' | 'medium_term' | 'long_term' = 'medium_term', limit = 50,) { return this.get(userId, '/me/top/artists', { time_range: timeRange, limit: String(limit), },); }
 
   getCurrentlyPlaying(userId: string) { return this.get(userId, '/me/player/currently-playing',); }
+
+  getUserProfile(userId: string): Promise<SpotifyUserProfile> {
+    return this.get<SpotifyUserProfile>(userId, '/me');
+  }
+}
+
+export interface SpotifyUserProfile {
+  id: string;
+  display_name: string;
+  images?: { url: string; height: number | null; width: number | null }[];
 }
 
 // Tipos básicos que vamos usar no SyncModule

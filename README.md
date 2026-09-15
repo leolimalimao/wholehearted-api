@@ -119,6 +119,9 @@ Cookies `SameSite: 'none'` são bloqueados por browsers em aba anônima e em con
 ### Por que desnormalizar a tabela scrobbles?
 Queries de agregação (top tracks, top artists, activity by hour) com joins em tabelas normalizadas são mais lentas e complexas. Com dados de faixa e artista na própria linha do scrobble, as queries usam `GROUP BY` direto — sem joins, com índices eficientes.
 
+### Por que Lazy Backfill para foto de perfil do Spotify?
+A foto do perfil é capturada inicialmente no momento do login OAuth. No entanto, para suportar usuários existentes no banco sem exigir que façam logout/login, o `SyncProcessor` implementa um lazy backfill idempotente: se `avatarUrl` for nulo, busca a imagem via `GET /v1/me`, persiste e invalida o cache. Usuários com avatar já preenchido pulam a chamada, garantindo custo contínuo de rate limit estritamente zero para os ciclos periódicos. O tratamento de erro é não-bloqueante (falhas pontuais na API do Spotify não impedem a ingestão de scrobbles).
+
 ### Preparação para multi-tenant sem reescrever
 Todo método do `StatsService` recebe `userId` como primeiro parâmetro desde o início. O `AuthGuard` extrai o `userId` do JWT — sem query ao banco por request. Quando um novo usuário faz login, um job BullMQ é registrado especificamente para ele. A mudança para multi-tenant completo foi cirúrgica: dois arquivos alterados, nenhuma regra de negócio reescrita.
 
