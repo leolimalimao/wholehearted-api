@@ -30,7 +30,14 @@ export class PublicController {
       this.statsService.getTopArtists(user.id, 'month', 5),
     ]);
 
-    const result = { slug: user.slug, displayName: user.displayName, total, topTracks, topArtists };
+    const result = {
+      slug: user.slug,
+      displayName: user.displayName,
+      avatarUrl: user.avatarUrl ?? null,
+      total,
+      topTracks,
+      topArtists,
+    };
 
     await this.cache.set(result, 600, 'public:profile', slug);
     return result;

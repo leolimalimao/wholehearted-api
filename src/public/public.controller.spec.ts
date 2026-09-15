@@ -17,6 +17,9 @@ const mockAuthService = () => ({
 const mockStatsService = () => ({
   getScrobblesPerDay: jest.fn(),
   getRecentScrobbles: jest.fn(),
+  getTotalScrobbles: jest.fn(),
+  getTopTracks: jest.fn(),
+  getTopArtists: jest.fn(),
 });
 
 describe('PublicController - getPublicTimeline', () => {
@@ -111,6 +114,81 @@ describe('PublicController - getPublicTimeline', () => {
       authService.findBySlug.mockResolvedValueOnce(null);
 
       await expect(controller.getPublicRecent(slug, '20')).rejects.toBeInstanceOf(NotFoundException);
+      expect(cacheService.set).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getPublicProfile', () => {
+    it('retorna do cache se presente', async () => {
+      const cached = { slug, displayName: 'Leonardo', avatarUrl: 'https://i.scdn.co/image/abc' };
+      cacheService.get.mockResolvedValueOnce(cached);
+
+      const result = await controller.getPublicProfile(slug);
+
+      expect(result).toBe(cached);
+      expect(cacheService.get).toHaveBeenCalledWith('public:profile', slug);
+      expect(authService.findBySlug).not.toHaveBeenCalled();
+    });
+
+    it('busca no AuthService e StatsService, incluindo avatarUrl, armazena no cache e retorna', async () => {
+      const userWithAvatar = {
+        id: 'user-1',
+        slug,
+        displayName: 'Leonardo',
+        avatarUrl: 'https://i.scdn.co/image/profile-pic',
+      } as any;
+
+      cacheService.get.mockResolvedValueOnce(null);
+      authService.findBySlug.mockResolvedValueOnce(userWithAvatar);
+      statsService.getTotalScrobbles.mockResolvedValueOnce(150);
+      statsService.getTopTracks.mockResolvedValueOnce([]);
+      statsService.getTopArtists.mockResolvedValueOnce([]);
+
+      const result = await controller.getPublicProfile(slug);
+
+      expect(cacheService.get).toHaveBeenCalledWith('public:profile', slug);
+      expect(authService.findBySlug).toHaveBeenCalledWith(slug);
+      expect(statsService.getTotalScrobbles).toHaveBeenCalledWith(userWithAvatar.id, 'all');
+      expect(statsService.getTopTracks).toHaveBeenCalledWith(userWithAvatar.id, 'month', 5);
+      expect(statsService.getTopArtists).toHaveBeenCalledWith(userWithAvatar.id, 'month', 5);
+
+      const expected = {
+        slug,
+        displayName: 'Leonardo',
+        avatarUrl: 'https://i.scdn.co/image/profile-pic',
+        total: 150,
+        topTracks: [],
+        topArtists: [],
+      };
+
+      expect(cacheService.set).toHaveBeenCalledWith(expected, 600, 'public:profile', slug);
+      expect(result).toEqual(expected);
+    });
+
+    it('retorna avatarUrl como null se o usuário não possuir foto', async () => {
+      const userWithoutAvatar = {
+        id: 'user-1',
+        slug,
+        displayName: 'Leonardo',
+        avatarUrl: null,
+      } as any;
+
+      cacheService.get.mockResolvedValueOnce(null);
+      authService.findBySlug.mockResolvedValueOnce(userWithoutAvatar);
+      statsService.getTotalScrobbles.mockResolvedValueOnce(0);
+      statsService.getTopTracks.mockResolvedValueOnce([]);
+      statsService.getTopArtists.mockResolvedValueOnce([]);
+
+      const result = await controller.getPublicProfile(slug);
+
+      expect(result.avatarUrl).toBeNull();
+    });
+
+    it('lança NotFoundException se usuário não existir', async () => {
+      cacheService.get.mockResolvedValueOnce(null);
+      authService.findBySlug.mockResolvedValueOnce(null);
+
+      await expect(controller.getPublicProfile(slug)).rejects.toBeInstanceOf(NotFoundException);
       expect(cacheService.set).not.toHaveBeenCalled();
     });
   });

@@ -109,11 +109,13 @@ export class AuthService {
     });
 
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+    const avatarUrl = profile.images?.[0]?.url ?? null;
 
     if (existing) {
-      // usuário existente — atualiza tokens mas mantém o slug
+      // usuário existente — atualiza tokens e perfil mas mantém o slug
       await this.userRepo.update(existing.id, {
         displayName:            profile.display_name,
+        avatarUrl,
         encryptedRefreshToken:  this.encryption.encrypt(tokens.refresh_token),
         encryptedAccessToken:   this.encryption.encrypt(tokens.access_token),
         accessTokenExpiresAt:   expiresAt,
@@ -122,7 +124,7 @@ export class AuthService {
         { userId: existing.id.slice(-4), slug: existing.slug },
         `Sessão de usuário existente atualizada: ${existing.slug}`,
       );
-      return { ...existing, displayName: profile.display_name };
+      return { ...existing, displayName: profile.display_name, avatarUrl };
     }
 
     // novo usuário — gera slug único
@@ -132,6 +134,7 @@ export class AuthService {
       this.userRepo.create({
         spotifyId:             profile.id,
         displayName:           profile.display_name,
+        avatarUrl,
         slug,
         encryptedRefreshToken: this.encryption.encrypt(tokens.refresh_token),
         encryptedAccessToken:  this.encryption.encrypt(tokens.access_token),
@@ -200,6 +203,7 @@ export class AuthService {
         id: true,
         slug: true,
         displayName: true,
+        avatarUrl: true,
       },
     });
   }

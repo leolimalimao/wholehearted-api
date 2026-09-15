@@ -36,6 +36,7 @@ describe('SyncProcessor', () => {
     id: 'user-uuid-123',
     slug: 'leonardo',
     displayName: 'Leonardo',
+    avatarUrl: 'https://i.scdn.co/image/existing',
   };
 
   beforeEach(async () => {
@@ -44,7 +45,10 @@ describe('SyncProcessor', () => {
         SyncProcessor,
         {
           provide: SpotifyService,
-          useValue: { getRecentlyPlayed: jest.fn() },
+          useValue: {
+            getRecentlyPlayed: jest.fn(),
+            getUserProfile: jest.fn(),
+          },
         },
         {
           provide: getRepositoryToken(Scrobble),
@@ -57,7 +61,7 @@ describe('SyncProcessor', () => {
         },
         {
           provide: getRepositoryToken(User),
-          useValue: { findOne: jest.fn() },
+          useValue: { findOne: jest.fn(), update: jest.fn() },
         },
         {
           provide: CacheService,
@@ -261,6 +265,77 @@ describe('SyncProcessor', () => {
 
       // Act & Assert
       await expect(processor.process(job)).rejects.toThrow('Spotify 503 Service Unavailable');
+    });
+  });
+
+  describe('lazy backfill de avatar', () => {
+    it('busca foto no Spotify e atualiza banco quando avatarUrl for null', async () => {
+      // Arrange
+      const userWithoutAvatar = {
+        id: 'user-uuid-123',
+        slug: 'leonardo',
+        displayName: 'Leonardo',
+        avatarUrl: null,
+      };
+      userRepo.findOne.mockResolvedValue(userWithoutAvatar);
+      scrobbleRepo.findOne.mockResolvedValue(null);
+      spotifyService.getUserProfile.mockResolvedValue({
+        id: 'spotify-123',
+        display_name: 'Leonardo',
+        images: [{ url: 'https://i.scdn.co/image/new-avatar', height: 300, width: 300 }],
+      });
+      spotifyService.getRecentlyPlayed.mockResolvedValue({ items: [] });
+
+      const job = { data: { userId: userWithoutAvatar.id } } as any;
+
+      // Act
+      await processor.process(job);
+
+      // Assert
+      expect(spotifyService.getUserProfile).toHaveBeenCalledWith(userWithoutAvatar.id);
+      expect(userRepo.update).toHaveBeenCalledWith(userWithoutAvatar.id, {
+        avatarUrl: 'https://i.scdn.co/image/new-avatar',
+      });
+      expect(cacheService.invalidatePattern).toHaveBeenCalledWith('public:profile:leonardo');
+    });
+
+    it('não chama a API de perfil quando o usuário já possui avatarUrl preenchido', async () => {
+      // Arrange
+      userRepo.findOne.mockResolvedValue(mockUser); // mockUser possui avatarUrl: 'https://i.scdn.co/image/existing'
+      scrobbleRepo.findOne.mockResolvedValue(null);
+      spotifyService.getRecentlyPlayed.mockResolvedValue({ items: [] });
+
+      const job = { data: { userId: mockUser.id } } as any;
+
+      // Act
+      await processor.process(job);
+
+      // Assert
+      expect(spotifyService.getUserProfile).not.toHaveBeenCalled();
+      expect(userRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('não bloqueia a sincronização de scrobbles se a busca de perfil falhar', async () => {
+      // Arrange
+      const userWithoutAvatar = {
+        id: 'user-uuid-123',
+        slug: 'leonardo',
+        displayName: 'Leonardo',
+        avatarUrl: null,
+      };
+      userRepo.findOne.mockResolvedValue(userWithoutAvatar);
+      scrobbleRepo.findOne.mockResolvedValue(null);
+      scrobbleRepo.find.mockResolvedValue([]);
+      spotifyService.getUserProfile.mockRejectedValue(new Error('Falha temporária no Spotify'));
+      spotifyService.getRecentlyPlayed.mockResolvedValue({
+        items: [makeSpotifyItem()],
+      });
+
+      const job = { data: { userId: userWithoutAvatar.id } } as any;
+
+      // Act & Assert
+      await expect(processor.process(job)).resolves.not.toThrow();
+      expect(scrobbleRepo.save).toHaveBeenCalled();
     });
   });
 });

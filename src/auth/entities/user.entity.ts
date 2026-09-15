@@ -15,6 +15,9 @@ export class User {
   @Index()
   slug!: string; // novo campo — único e indexado pra busca rápida por URL
 
+  @Column({ type: 'text', nullable: true })
+  avatarUrl!: string | null;
+
   @Column({ type: 'text', select: false })
   encryptedRefreshToken!: string;
 
