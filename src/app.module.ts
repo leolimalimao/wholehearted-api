@@ -15,6 +15,8 @@ import { AuthGuard } from './common/guards/auth.guard';
 import { LoggerModule } from './shared/logger/logger.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
 
 @Module({
   imports: [
@@ -64,7 +66,9 @@ import { APP_GUARD } from '@nestjs/core';
     CacheModule,
     LoggerModule,
   ],
+  controllers: [AppController],
   providers: [
+    AppService,
     AuthGuard,
     {
       provide: APP_GUARD,
