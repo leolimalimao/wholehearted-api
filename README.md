@@ -149,6 +149,17 @@ O endpoint do Spotify retorna até 50 faixas recentes por consulta. Em vez de em
 Diferente de arquiteturas Serverless (como rotas da Vercel ou AWS Lambda), onde funções efêmeras exigem um connection pooler intermediário (`-pooler` via PgBouncer) para evitar a exaustão de conexões TCP, o backend do Wholehearted.stats opera como um processo contínuo (daemon) no Railway. O driver `pg`/TypeORM já implementa e gerencia seu próprio pool de conexões persistentes (`pg.Pool`).
 Conectar via PgBouncer em modo transação gerava redundância ("pool sobre pool"), descarte de variáveis de sessão (`search_path`) e retenção de conexões pré-aquecidas com estado obsoleto. A adoção da **Conexão Direta** (removendo `-pooler` do host) simplificou a topologia, garantiu total compatibilidade com prepared statements e estabilizou a resolução de schema do PostgreSQL.
 
+### Proteção contra Cache Stampede e Avalanche (Single-Flight + Jitter)
+Consultas de perfis públicos executam agregações analíticas custosas (`GROUP BY`, `EXTRACT`, `COUNT`) sobre a tabela `scrobbles`. Quando uma chave expirava ou era invalidada, múltiplos acessos simultâneos causavam:
+1. **Cache Stampede (Thundering Herd):** Dezenas de requisições concorrentes recebiam `MISS` no mesmo milissegundo e disparavam queries idênticas ao PostgreSQL, saturando o pool de conexões.
+2. **Cache Avalanche:** Múltiplas chaves criadas no mesmo instante com o mesmo TTL expiravam simultaneamente a cada 10 minutos, gerando picos periódicos de carga no banco.
+
+**Solução adotada:**
+- **Jitter estocástico no `CacheService.set`:** Adiciona uma dispersão uniforme de $\pm 10\%$ ao TTL base (ex: 600s varia entre 540s e 660s), dessincronizando a expiração de chaves irmãs e achatando a curva de repopulação.
+- **Single-Flight (Request Coalescing) in-process via `CacheService.getOrSet`:** Um mapa de Promises ativas (`inFlight`) rastreia requisições em andamento. Quando múltiplas requisições concorrentes chegam para a mesma chave, apenas a pioneira consulta o PostgreSQL; todas as demais aguardam a resolução da mesma Promise através da Microtask Queue da V8, recebendo os dados diretamente em memória com custo de rede e banco estritamente zero.
+- **Observabilidade sem ruído:** Telemetria atômica em memória (`hits`, `misses`, `coalescedRequests`) acessível via `getMetrics()`, preservando a política de logs limpos em produção.
+- Estudo técnico completo documentado em [`docs/plans/cache-stampede-resilience.md`](docs/plans/cache-stampede-resilience.md).
+
 ---
 
 ## Testes
@@ -157,11 +168,12 @@ O projeto inclui testes unitários (Jest) com cobertura dos componentes crítico
 
 - `src/common/utils/slug.util.spec.ts` — Geração e validação de slugs
 - `src/common/encryption/encryption.service.spec.ts` — Criptografia AES-256-GCM
+- `src/common/cache/cache.service.spec.ts` — CacheService com Jitter, Single-Flight coalescing e métricas
 - `src/app.controller.spec.ts` — Controller principal
 - `src/sync/sync.processor.spec.ts` — Processador de sync BullMQ com batch dedup
 - `src/sync/sync.service.spec.ts` — Inicialização de agendamentos e projeção restrita de usuários
 - `src/stats/stats.service.spec.ts` — Projeção sanitizada de scrobbles recentes
-- `src/public/public.controller.spec.ts` — Rotas públicas com cache e tratamento de perfis
+- `src/public/public.controller.spec.ts` — Rotas públicas com cache getOrSet e tratamento de perfis
 
 Os testes utilizam mocks tipados e cobrem caminhos felizes e edge cases. Execute com `npm run test` (local) ou `npm run test:cov` para cobertura detalhada.
 
