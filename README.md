@@ -145,6 +145,10 @@ O comportamento padrão de ORMs (trazer todas as colunas da entidade via `SELECT
 ### Deduplicação de Scrobbles em Lote (Batch Dedup)
 O endpoint do Spotify retorna até 50 faixas recentes por consulta. Em vez de emitir até 50 queries sequenciais individuais ao PostgreSQL para verificar existência (`findOne`/`existsBy`), o worker extrai os timestamps recebidos e realiza uma única busca em lote via `In(playedAts)`. O matching é resolvido em memória em tempo $O(1)$ através de um `Set`, reduzindo o tráfego de rede entre a aplicação e o banco e acelerando a execução dos jobs do BullMQ.
 
+### Decisão de Infraestrutura: Conexão Direta ao PostgreSQL (Neon) sem PgBouncer
+Diferente de arquiteturas Serverless (como rotas da Vercel ou AWS Lambda), onde funções efêmeras exigem um connection pooler intermediário (`-pooler` via PgBouncer) para evitar a exaustão de conexões TCP, o backend do Wholehearted.stats opera como um processo contínuo (daemon) no Railway. O driver `pg`/TypeORM já implementa e gerencia seu próprio pool de conexões persistentes (`pg.Pool`).
+Conectar via PgBouncer em modo transação gerava redundância ("pool sobre pool"), descarte de variáveis de sessão (`search_path`) e retenção de conexões pré-aquecidas com estado obsoleto. A adoção da **Conexão Direta** (removendo `-pooler` do host) simplificou a topologia, garantiu total compatibilidade com prepared statements e estabilizou a resolução de schema do PostgreSQL.
+
 ---
 
 ## Testes
