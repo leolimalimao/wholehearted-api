@@ -7,6 +7,8 @@ export class CacheService {
   private readonly PREFIX = 'cache:';
   private readonly DEFAULT_TTL = 60 * 10; // 10 minutos em segundos
 
+  private readonly DEFAULT_JITTER_RATIO = 0.1; // ±10%
+
   constructor(
     private redis: RedisService,
     @Optional()
@@ -16,6 +18,17 @@ export class CacheService {
 
   private key(namespace: string, ...parts: string[]): string {
     return `${this.PREFIX}${namespace}:${parts.join(':')}`;
+  }
+
+  /**
+   * Calcula o TTL com ruído estocástico (jitter) para evitar Cache Avalanche
+   * (múltiplas chaves expirando em sincronia).
+   */
+  calculateJitterTtl(ttlSeconds: number, jitterRatio: number = this.DEFAULT_JITTER_RATIO): number {
+    if (jitterRatio <= 0 || ttlSeconds <= 0) return ttlSeconds;
+    const min = Math.floor(ttlSeconds * (1 - jitterRatio));
+    const max = Math.ceil(ttlSeconds * (1 + jitterRatio));
+    return Math.floor(min + Math.random() * (max - min + 1));
   }
 
   async get<T>(namespace: string, ...parts: string[]): Promise<T | null> {
@@ -53,13 +66,17 @@ export class CacheService {
     ...parts: string[]
   ): Promise<void> {
     const cacheKey = this.key(namespace, ...parts);
+    const effectiveTtl = this.calculateJitterTtl(ttlSeconds);
     try {
       await this.redis.set(
         cacheKey,
         JSON.stringify(value),
-        ttlSeconds,
+        effectiveTtl,
       );
-      this.logger?.debug({ key: cacheKey, ttlSeconds }, 'Chave gravada no cache com sucesso');
+      this.logger?.debug(
+        { key: cacheKey, ttlSeconds: effectiveTtl, baseTtl: ttlSeconds },
+        'Chave gravada no cache com sucesso',
+      );
     } catch (err: any) {
       this.logger?.warn(
         { key: cacheKey, err: err?.message },
