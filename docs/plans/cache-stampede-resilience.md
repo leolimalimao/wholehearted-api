@@ -69,13 +69,21 @@ O Redis mantém contadores acumulados de hits e misses em memória:
   redis-cli info stats
   ```
 
-### 3.2 Camada 2: Na Aplicação NestJS (`CacheService`)
-* **Estado Atual:** O `CacheService` loga `Cache HIT` e `Cache MISS` em nível `debug`. Como o padrão de produção (`LOG_LEVEL`) é `info`, esses eventos são suprimidos para evitar ruído de log (conforme AGENTS.md Regra 7).
-* **Melhoria Arquitetural:** Em vez de emitir logs para cada requisição, o `CacheService` acumula contadores atômicos em memória:
-  * `hits`: Total de hits no cache.
-  * `misses`: Total de misses que precisaram buscar a fonte primária.
-  * `coalescedRequests`: Total de requisições concorrentes salvas de consultar o banco graças ao Single-Flight (*Single-Flight Savings*).
-  * Exposição via método `getMetrics()` para healthchecks e diagnósticos.
+### 3.2 Camada 2: Na Aplicação NestJS (`CacheService` e `GET /api/cache/metrics`)
+* **Estado Anterior:** O `CacheService` logava `Cache HIT` e `Cache MISS` em nível `debug`. Como o padrão de produção (`LOG_LEVEL`) é `info`, esses eventos eram suprimidos para evitar ruído de log (conforme AGENTS.md Regra 7).
+* **Solução de Telemetria:** Em vez de emitir logs a cada requisição, o `CacheService` acumula contadores atômicos em memória, expostos publicamente através do endpoint de diagnóstico **`GET /api/cache/metrics`**:
+  ```json
+  {
+    "hits": 1420,
+    "misses": 48,
+    "coalescedRequests": 112,
+    "hitRatio": 0.9673
+  }
+  ```
+  * `hits`: Total de requisições respondidas diretamente pelo Redis.
+  * `misses`: Total de requisições pioneiras que precisaram consultar o PostgreSQL.
+  * `coalescedRequests`: Total de requisições concorrentes que pegaram carona em Promise em andamento e foram salvas de ir ao banco (*Single-Flight Savings*).
+  * `hitRatio`: Proporção de acertos $\frac{\text{hits}}{\text{hits} + \text{misses}}$.
 
 ### 3.3 Camada 3: No PostgreSQL (Neon)
 * **Monitoramento Visual:** Gráficos de **Compute / CPU Usage** e **Active Connections** no Console do Neon.

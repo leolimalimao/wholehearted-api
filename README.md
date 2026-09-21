@@ -206,6 +206,12 @@ GET /api/public/profile/:slug
 GET /api/public/profile/:slug/overview?range=month
 GET /api/public/profile/:slug/recent?limit=20
 GET /api/public/profile/:slug/hours?range=month
+GET /api/public/profile/:slug/timeline?range=year
+```
+
+### Diagnóstico & Telemetria
+```
+GET /api/cache/metrics   → métricas em tempo real (hits, misses, coalescedRequests, hitRatio)
 ```
 
 **Valores válidos para `range`:** `week` | `month` | `3months` | `6months` | `year` | `all`
