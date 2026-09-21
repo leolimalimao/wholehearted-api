@@ -2,12 +2,26 @@ import { Injectable, Optional } from '@nestjs/common';
 import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 import { RedisService } from '../redis/redis.service';
 
+export interface CacheMetrics {
+  hits: number;
+  misses: number;
+  coalescedRequests: number;
+  hitRatio: number;
+}
+
 @Injectable()
 export class CacheService {
   private readonly PREFIX = 'cache:';
   private readonly DEFAULT_TTL = 60 * 10; // 10 minutos em segundos
-
   private readonly DEFAULT_JITTER_RATIO = 0.1; // ±10%
+
+  private readonly inFlight = new Map<string, Promise<any>>();
+
+  private metrics = {
+    hits: 0,
+    misses: 0,
+    coalescedRequests: 0,
+  };
 
   constructor(
     private redis: RedisService,
@@ -18,6 +32,77 @@ export class CacheService {
 
   private key(namespace: string, ...parts: string[]): string {
     return `${this.PREFIX}${namespace}:${parts.join(':')}`;
+  }
+
+  getMetrics(): CacheMetrics {
+    const totalLookups = this.metrics.hits + this.metrics.misses;
+    const hitRatio = totalLookups > 0 ? Number((this.metrics.hits / totalLookups).toFixed(4)) : 0;
+    return {
+      hits: this.metrics.hits,
+      misses: this.metrics.misses,
+      coalescedRequests: this.metrics.coalescedRequests,
+      hitRatio,
+    };
+  }
+
+  resetMetrics(): void {
+    this.metrics = {
+      hits: 0,
+      misses: 0,
+      coalescedRequests: 0,
+    };
+  }
+
+  /**
+   * Padrão Single-Flight (Request Coalescing) com Cache-Aside e Jitter.
+   * Colapsa múltiplas chamadas concorrentes para a mesma chave em uma única
+   * ida à fonte de dados (PostgreSQL), evitando Cache Stampede.
+   */
+  async getOrSet<T>(
+    factory: () => Promise<T>,
+    ttlSeconds: number = this.DEFAULT_TTL,
+    namespace: string,
+    ...parts: string[]
+  ): Promise<T> {
+    const cacheKey = this.key(namespace, ...parts);
+
+    // 1. Otimização: se já existe uma computação em andamento, aguarda imediatamente
+    const existingFlight = this.inFlight.get(cacheKey);
+    if (existingFlight) {
+      this.metrics.coalescedRequests++;
+      this.logger?.debug({ key: cacheKey }, 'Single-flight: requisição coalescida em Promise em andamento');
+      return (await existingFlight) as T;
+    }
+
+    // 2. Busca no cache Redis
+    const cached = await this.get<T>(namespace, ...parts);
+    if (cached !== null) {
+      this.metrics.hits++;
+      return cached;
+    }
+
+    // 3. Double-check: outra requisição pode ter iniciado a Promise enquanto aguardávamos o Redis
+    const concurrentFlight = this.inFlight.get(cacheKey);
+    if (concurrentFlight) {
+      this.metrics.coalescedRequests++;
+      this.logger?.debug({ key: cacheKey }, 'Single-flight: requisição coalescida após verificação no Redis');
+      return (await concurrentFlight) as T;
+    }
+
+    // 4. Esta requisição é a pioneira (flyer): agenda a busca na fonte e registra no inFlight
+    this.metrics.misses++;
+    const flightPromise = (async () => {
+      try {
+        const result = await factory();
+        await this.set(result, ttlSeconds, namespace, ...parts);
+        return result;
+      } finally {
+        this.inFlight.delete(cacheKey);
+      }
+    })();
+
+    this.inFlight.set(cacheKey, flightPromise);
+    return await flightPromise;
   }
 
   /**
