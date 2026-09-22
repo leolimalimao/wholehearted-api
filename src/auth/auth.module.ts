@@ -8,7 +8,14 @@ import { EncryptionService } from '../common/encryption/encryption.service';
 import { SyncModule } from '../sync/sync.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User]), HttpModule, SyncModule],
+  imports: [
+    TypeOrmModule.forFeature([User]),
+    HttpModule.register({
+      timeout: 10000,
+      maxRedirects: 5,
+    }),
+    SyncModule,
+  ],
   controllers: [AuthController],
   providers: [AuthService, EncryptionService],
   exports: [AuthService],

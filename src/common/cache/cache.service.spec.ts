@@ -276,6 +276,39 @@ describe('CacheService', () => {
       expect(result).toEqual({ status: 'ok' });
       expect(factory).toHaveBeenCalledTimes(1);
     });
+
+    it('deve disparar timeout defensivo, desalocar chave de inFlight e permitir novas requisições', async () => {
+      redisService.get.mockResolvedValue(null);
+      service.flightTimeoutMs = 50; // reduz o timeout para 50ms no teste
+
+      const hangingFactory = jest.fn().mockImplementation(() => new Promise(() => {})); // nunca resolve
+
+      await expect(
+        service.getOrSet(hangingFactory, 600, 'public:profile', 'hanging-user'),
+      ).rejects.toThrow(/Single-flight cache execution timed out after 50ms/);
+
+      // Chave deve ter sido evictada do inFlight, permitindo que uma nova requisição saudável execute
+      const recoveredFactory = jest.fn().mockResolvedValue({ recovered: true });
+      const result = await service.getOrSet(recoveredFactory, 600, 'public:profile', 'hanging-user');
+
+      expect(result).toEqual({ recovered: true });
+      expect(recoveredFactory).toHaveBeenCalledTimes(1);
+
+      service.flightTimeoutMs = 15000; // restaura o valor padrão
+    });
+
+    it('deve cancelar o timer via clearTimeout quando a factory resolver rapidamente', async () => {
+      redisService.get.mockResolvedValueOnce(null);
+      redisService.set.mockResolvedValueOnce();
+
+      const spyClearTimeout = jest.spyOn(global, 'clearTimeout');
+      const factory = jest.fn().mockResolvedValue({ fast: true });
+
+      await service.getOrSet(factory, 600, 'public:profile', 'fast-user');
+
+      expect(spyClearTimeout).toHaveBeenCalled();
+      spyClearTimeout.mockRestore();
+    });
   });
 
   describe('getMetrics e resetMetrics', () => {

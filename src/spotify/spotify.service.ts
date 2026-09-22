@@ -91,6 +91,7 @@ export class SpotifyService {
         this.http.get<T>(`${SPOTIFY_BASE}${endpoint}`, {
           headers: { Authorization: `Bearer ${accessToken}` },
           params,
+          timeout: 10000,
         }),
       );
 
@@ -109,6 +110,21 @@ export class SpotifyService {
         this.logger.error(
           { err, endpoint, durationMs, userId: userId.slice(-4) },
           `Erro inesperado na chamada ao Spotify em ${endpoint}`,
+        );
+        throw err;
+      }
+
+      const isTimeout = err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT';
+      if (isTimeout) {
+        this.logger.error(
+          {
+            endpoint,
+            code: err.code,
+            durationMs,
+            userId: userId.slice(-4),
+            message: err.message,
+          },
+          `Timeout de requisição (${durationMs}ms) ao chamar Spotify API em ${endpoint}`,
         );
         throw err;
       }

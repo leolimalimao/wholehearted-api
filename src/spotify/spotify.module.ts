@@ -8,7 +8,10 @@ import { EncryptionService } from '../common/encryption/encryption.service';
 
 @Module({
   imports: [
-    HttpModule,
+    HttpModule.register({
+      timeout: 10000,
+      maxRedirects: 5,
+    }),
     TypeOrmModule.forFeature([User]),
     forwardRef(() => AuthModule),
   ],

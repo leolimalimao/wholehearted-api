@@ -33,11 +33,17 @@ export class AuthService {
       const response = await firstValueFrom(
         this.http.post('https://accounts.spotify.com/api/token', params, {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          timeout: 10000,
         }),
       );
       this.logger.info('Tokens OAuth obtidos com sucesso do Spotify.');
       return response.data;
     } catch (err: any) {
+      const isTimeout = err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT';
+      if (isTimeout) {
+        this.logger.error({ err, code: err.code }, 'Timeout de 10s ao trocar code por tokens no Spotify');
+        throw new HttpException('Timeout ao comunicar com o Spotify', HttpStatus.GATEWAY_TIMEOUT);
+      }
       const errorDesc = err.response?.data?.error_description ?? err.response?.data?.error ?? err.message;
       this.logger.error(
         {
@@ -59,11 +65,17 @@ export class AuthService {
       const response = await firstValueFrom(
         this.http.get('https://api.spotify.com/v1/me', {
           headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 10000,
         }),
       );
       this.logger.debug({ spotifyId: response.data?.id }, 'Perfil obtido com sucesso do Spotify.');
       return response.data;
     } catch (err: any) {
+      const isTimeout = err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT';
+      if (isTimeout) {
+        this.logger.error({ err, code: err.code }, 'Timeout ao obter perfil do usuário no Spotify');
+        throw new HttpException('Timeout ao obter perfil do Spotify', HttpStatus.GATEWAY_TIMEOUT);
+      }
       this.logger.error(
         {
           err,
@@ -162,6 +174,7 @@ export class AuthService {
       const response = await firstValueFrom(
         this.http.post('https://accounts.spotify.com/api/token', params, {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          timeout: 10000,
         }),
       );
 
@@ -183,15 +196,23 @@ export class AuthService {
 
       return data.access_token;
     } catch (err: any) {
-      this.logger.error(
-        {
-          err,
-          userId: user.id.slice(-4),
-          spotifyError: err.response?.data,
-          status: err.response?.status,
-        },
-        `Falha ao renovar token junto à API do Spotify para usuário ...${user.id.slice(-4)}`,
-      );
+      const isTimeout = err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT';
+      if (isTimeout) {
+        this.logger.error(
+          { err, userId: user.id.slice(-4), code: err.code },
+          `Timeout de 10s ao renovar token junto à API do Spotify para usuário ...${user.id.slice(-4)}`,
+        );
+      } else {
+        this.logger.error(
+          {
+            err,
+            userId: user.id.slice(-4),
+            spotifyError: err.response?.data,
+            status: err.response?.status,
+          },
+          `Falha ao renovar token junto à API do Spotify para usuário ...${user.id.slice(-4)}`,
+        );
+      }
       throw err;
     }
   }

@@ -14,6 +14,8 @@ export class CacheService {
   private readonly PREFIX = 'cache:';
   private readonly DEFAULT_TTL = 60 * 10; // 10 minutos em segundos
   private readonly DEFAULT_JITTER_RATIO = 0.1; // ±10%
+  private readonly DEFAULT_FLIGHT_TIMEOUT_MS = 15000; // 15 segundos
+  public flightTimeoutMs = this.DEFAULT_FLIGHT_TIMEOUT_MS;
 
   private readonly inFlight = new Map<string, Promise<any>>();
 
@@ -57,6 +59,9 @@ export class CacheService {
    * Padrão Single-Flight (Request Coalescing) com Cache-Aside e Jitter.
    * Colapsa múltiplas chamadas concorrentes para a mesma chave em uma única
    * ida à fonte de dados (PostgreSQL), evitando Cache Stampede.
+   *
+   * Inclui Defensive Timeout: impede que Promises travadas residam no Map
+   * indefinidamente e sejam promovidas para a Old Generation da heap do V8.
    */
   async getOrSet<T>(
     factory: () => Promise<T>,
@@ -91,15 +96,35 @@ export class CacheService {
 
     // 4. Esta requisição é a pioneira (flyer): agenda a busca na fonte e registra no inFlight
     this.metrics.misses++;
-    const flightPromise = (async () => {
-      try {
-        const result = await factory();
-        await this.set(result, ttlSeconds, namespace, ...parts);
-        return result;
-      } finally {
+
+    let timer: NodeJS.Timeout | null = null;
+    const timeoutMs = this.flightTimeoutMs;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
         this.inFlight.delete(cacheKey);
-      }
+        this.logger?.error(
+          { key: cacheKey, timeoutMs },
+          'Single-flight: timeout defensivo atingido durante execução da factory de cache',
+        );
+        reject(
+          new Error(
+            `Single-flight cache execution timed out after ${timeoutMs}ms for key: ${cacheKey}`,
+          ),
+        );
+      }, timeoutMs);
+    });
+
+    const executionPromise = (async () => {
+      const result = await factory();
+      await this.set(result, ttlSeconds, namespace, ...parts);
+      return result;
     })();
+
+    const flightPromise = Promise.race([executionPromise, timeoutPromise]).finally(() => {
+      if (timer) clearTimeout(timer);
+      this.inFlight.delete(cacheKey);
+    });
 
     this.inFlight.set(cacheKey, flightPromise);
     return await flightPromise;

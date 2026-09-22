@@ -160,6 +160,18 @@ Consultas de perfis públicos executam agregações analíticas custosas (`GROUP
 - **Observabilidade sem ruído:** Telemetria atômica em memória (`hits`, `misses`, `coalescedRequests`) acessível via `getMetrics()`, preservando a política de logs limpos em produção.
 - Estudo técnico completo documentado em [`docs/plans/cache-stampede-resilience.md`](docs/plans/cache-stampede-resilience.md).
 
+### Resiliência de Memória V8 e Timeouts Defensivos (Prevenção de Leaks na Old Generation)
+No Node.js, serviços NestJS com escopo Singleton atuam como raízes de Garbage Collection (**GC Roots**). No `CacheService`, o padrão Single-Flight utiliza um `Map` (`inFlight`) em memória para coordenar chamadas simultâneas. Se uma chamada de rede externa (Spotify Web API) travasse indefinidamente por ausência de timeout ou falha de socket TCP half-open:
+1. O bloco `finally` nunca seria alcançado.
+2. A Promise e todo o grafo de closures/buffers associados permaneceriam retidos no `inFlight Map`.
+3. O coletor generacional do V8 (Scavenger) preservaria esses objetos nos ciclos de New Space, promovendo-os para a **Old Generation (Tenured Space)**.
+4. O acúmulo contínuo levaria à exaustão de memória (`heap out of memory`), além de bloquear eternamente requisições subsequentes para a mesma chave.
+
+**Solução adotada:**
+- **Timeouts HTTP explícitos de 10s (`HttpModule` e Axios):** Tanto o `SpotifyModule` quanto o `AuthModule` foram configurados com timeout rigoroso de 10 segundos e tratamento estruturado dos erros de aborto/rede (`ECONNABORTED`, `ETIMEDOUT`), garantindo que conexões externas nunca fiquem suspensas indefinidamente.
+- **Defensive Timeout de 15s no Single-Flight (`CacheService.getOrSet`):** Implementação de uma corrida controlada (`Promise.race`) entre a `factory` e um timer de segurança. Se a computação exceder 15s, a chave é imediatamente evictada do `inFlight Map`, cancelando o timer (`clearTimeout`) e rejeitando a chamada para evitar a promoção de promessas zumbis para a Old Generation do V8.
+- Estudo arquitetural detalhado em [`docs/plans/v8-memory-leak-resilience.md`](docs/plans/v8-memory-leak-resilience.md).
+
 ---
 
 ## Testes
