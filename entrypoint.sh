@@ -5,7 +5,7 @@ set -e
 export PORT="${PORT:-3000}"
 
 # If REDIS_URL was not set, point to local Redis
-export REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379}"
+export REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6380}"
 
 echo "Starting Wholehearted API with embedded Redis on port ${PORT}..."
 

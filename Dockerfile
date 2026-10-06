@@ -45,7 +45,7 @@ RUN chmod +x /entrypoint.sh
 # Environment defaults
 ENV NODE_ENV=production
 ENV PORT=3000
-ENV REDIS_URL=redis://127.0.0.1:6379
+ENV REDIS_URL=redis://127.0.0.1:6380
 
 EXPOSE 3000
 
